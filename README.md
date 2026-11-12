@@ -16,7 +16,7 @@ This project perfectly replicates the rough feel of the early version of Minecra
 * **"Little Universe" Boundary Protocol**: Following the mechanism of Xueyuntianming's Little Universe, when you reach the edge of the 64x64 map, you will be automatically teleported out from the other side, enabling seamless circular wandering.
 * **Ancestral physics engine**: Jumping into water from a high place will never result in death.
 
-## 🛠️ How to Run（[### 🎮 [▶ 点击这里直接在线游玩 (Play Online)]（https://moxixi-2012.github.io/AI-i-Minecraft/AI-Minecraft/minecraft1.18.1.html））
+## 🎮 [▶ 点击这里直接在线游玩 (Play Online)](https://moxixi-2012.github.io/AI-i-Minecraft/AI-Minecraft/minecraft1.18.1.html)
 
 1. Download this project to your local system.
 2. Double-click `minecraft.html` to start your journey of creating the world.
