@@ -1,0 +1,1170 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Minecraft Pre-Classic rd-132211 (HTML Remake)</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #78a7ff; }
+  canvas { display: block; }
+  #hud {
+    position: fixed; top: 10px; left: 12px;
+    font-family: "Courier New", "Lucida Console", monospace;
+    font-size: 14px; color: #fff;
+    text-shadow: 2px 2px 0 #000;
+    pointer-events: none; user-select: none; z-index: 10;
+    letter-spacing: 0.5px;
+  }
+  #crosshair {
+    position: fixed; top: 50%; left: 50%;
+    width: 20px; height: 20px; margin: -10px 0 0 -10px;
+    pointer-events: none; z-index: 10;
+  }
+  #crosshair::before, #crosshair::after {
+    content: ""; position: absolute; background: #fff;
+    box-shadow: 0 0 2px #000;
+  }
+  #crosshair::before { left: 50%; top: 0; width: 2px; height: 100%; margin-left: -1px; }
+  #crosshair::after  { top: 50%; left: 0; height: 2px; width: 100%; margin-top: -1px; }
+  /* Underwater mask: same color as water (0x3a7ad8), shown only while the
+     camera block is a water block. */
+  #underwater {
+    position: fixed; inset: 0;
+    background: rgba(58, 122, 216, 0.45);
+    pointer-events: none; z-index: 5;
+    opacity: 0;
+    transition: opacity 0.1s linear;
+  }
+  #underwater.active { opacity: 1; }
+  /* Sneak indicator */
+  #sneak-indicator {
+    position: fixed; bottom: 90px; left: 50%; transform: translateX(-50%);
+    font-family: "Courier New", monospace; font-size: 14px; color: #ffe066;
+    text-shadow: 2px 2px 0 #000; letter-spacing: 2px;
+    pointer-events: none; z-index: 10;
+    opacity: 0; transition: opacity 0.08s linear;
+  }
+  #sneak-indicator.active { opacity: 1; }
+  /* Item name tooltip (shown briefly above the hotbar on switch) */
+  #item-name {
+    position: fixed; bottom: 110px; left: 50%; transform: translateX(-50%);
+    font-family: "Courier New", monospace; font-size: 18px;
+    color: #ffffff;
+    text-shadow: 2px 2px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000;
+    pointer-events: none; z-index: 10;
+    opacity: 0;
+    transition: opacity 0.25s linear;
+    white-space: nowrap;
+  }
+  #item-name.show { opacity: 1; }
+  /* ---------- Hotbar (bottom 9-slot bar) ---------- */
+  #hotbar {
+    position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%);
+    display: flex; gap: 4px; padding: 6px;
+    background: rgba(0,0,0,0.55);
+    border: 2px solid #444; border-radius: 4px;
+    z-index: 10;
+  }
+  #hotbar .slot {
+    width: 48px; height: 48px;
+    background: rgba(90,90,90,0.5);
+    border: 2px solid #666;
+    display: flex; align-items: center; justify-content: center;
+    position: relative;
+  }
+  #hotbar .slot.active {
+    border-color: #fff;
+    box-shadow: 0 0 10px rgba(255,255,255,0.7);
+  }
+  #hotbar .slot .swatch {
+    width: 36px; height: 36px;
+    box-shadow: inset 0 0 0 1px rgba(0,0,0,0.4);
+  }
+  /* ---------- Inventory panel (9x3 grid) ---------- */
+  #inventory {
+    position: fixed; top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    display: none; flex-direction: column; gap: 12px;
+    padding: 18px;
+    background: rgba(18,18,18,0.94);
+    border: 3px solid #555; border-radius: 6px;
+    z-index: 30;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.6);
+  }
+  #inventory.open { display: flex; }
+  #inventory h2 {
+    color: #ddd; font-family: "Courier New", monospace;
+    font-size: 16px; text-align: center; letter-spacing: 1px;
+  }
+  #inventory .grid {
+    display: grid;
+    grid-template-columns: repeat(9, 48px);
+    grid-template-rows: repeat(3, 48px);
+    gap: 4px;
+  }
+  #inventory .slot {
+    width: 48px; height: 48px;
+    background: rgba(90,90,90,0.5);
+    border: 2px solid #666;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer;
+  }
+  #inventory .slot:hover { border-color: #ccc; }
+  #inventory .slot.dragging { opacity: 0.35; }
+  #hotbar .slot.dragging { opacity: 0.35; }
+  #inventory .slot .swatch {
+    width: 36px; height: 36px;
+    box-shadow: inset 0 0 0 1px rgba(0,0,0,0.4);
+  }
+  #inventory .hint {
+    color: #999; font-family: "Courier New", monospace;
+    font-size: 12px; text-align: center;
+  }
+  #overlay {
+    position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+    background: rgba(0,0,0,0.55); z-index: 20; text-align: center; color: #fff;
+    font-family: "Courier New", monospace; pointer-events: auto; cursor: pointer;
+  }
+  #overlay h1 { font-size: 22px; margin-bottom: 10px; text-shadow: 2px 2px 0 #000; }
+  #overlay p  { font-size: 13px; line-height: 1.8; text-shadow: 1px 1px 0 #000; }
+  #overlay.hidden { display: none; }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<div id="hud">Minecraft Pre-Classic rd-132211 (HTML Remake)</div>
+<div id="sneak-indicator">潜行中</div>
+<div id="crosshair"></div>
+<div id="item-name"></div>
+<div id="underwater"></div>
+<div id="hotbar"></div>
+<div id="inventory">
+  <h2>背包</h2>
+  <div class="grid" id="inv-grid"></div>
+  <div class="hint">点击物品放入选中的快捷栏格 · 滚轮切换快捷栏 · E 关闭</div>
+</div>
+<div id="overlay">
+  <div>
+    <h1>Minecraft Pre-Classic rd-132211</h1>
+    <p>Click to play<br>
+    WASD move &nbsp;·&nbsp; Space jump &nbsp;·&nbsp; Mouse look<br>
+    LMB break block &nbsp;·&nbsp; RMB place block &nbsp;·&nbsp; Esc release mouse</p>
+  </div>
+</div>
+
+<script src="https://unpkg.com/three@0.128.0/build/three.min.js"></script>
+<script src="https://unpkg.com/three@0.128.0/examples/js/controls/PointerLockControls.js"></script>
+<script>
+(() => {
+  const SIZE = 64;
+  const AIR = 0, GRASS = 1, DIRT = 2, STONE = 3, WATER = 4, WOOD = 5, LEAVES = 6;
+
+  // ---------- Renderer / Scene / Camera ----------
+  const canvas = document.getElementById('game');
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: false });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.setSize(window.innerWidth, window.innerHeight);
+
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x78a7ff);
+  scene.fog = new THREE.Fog(0x78a7ff, 40, 130);
+
+  const camera = new THREE.PerspectiveCamera(
+    72, window.innerWidth / window.innerHeight, 0.05, 1000
+  );
+
+  // ---------- Lighting ----------
+  scene.add(new THREE.HemisphereLight(0x9fc4ff, 0x4a3a28, 0.7));
+  const dir = new THREE.DirectionalLight(0xffffff, 0.85);
+  dir.position.set(18, 30, 14);
+  scene.add(dir);
+  const fill = new THREE.DirectionalLight(0xffffff, 0.25);
+  fill.position.set(-10, 12, -8);
+  scene.add(fill);
+
+  // ---------- Procedural pixel textures ----------
+  function rngCanvas(drawFn) {
+    const c = document.createElement('canvas');
+    c.width = 16; c.height = 16;
+    const g = c.getContext('2d');
+    drawFn(g);
+    const tex = new THREE.CanvasTexture(c);
+    tex.magFilter = THREE.NearestFilter;
+    tex.minFilter = THREE.NearestFilter;
+    return tex;
+  }
+  function noiseFill(g, base, amp) {
+    for (let i = 0; i < 256; i++) {
+      const x = i % 16, y = (i / 16) | 0;
+      const v = (Math.random() * amp * 2 - amp) | 0;
+      g.fillStyle = 'rgb(' + (base[0]+v) + ',' + (base[1]+v) + ',' + (base[2]+v) + ')';
+      g.fillRect(x, y, 1, 1);
+    }
+  }
+  const dirtTex = rngCanvas(g => { g.fillStyle = '#8b5a2b'; g.fillRect(0,0,16,16); noiseFill(g, [139,90,43], 14); });
+  const stoneTex = rngCanvas(g => { g.fillStyle = '#8a8a8a'; g.fillRect(0,0,16,16); noiseFill(g, [138,138,138], 18); });
+  const grassTopTex = rngCanvas(g => {
+    g.fillStyle = '#5d9c3a'; g.fillRect(0,0,16,16);
+    for (let i = 0; i < 256; i++) {
+      const x = i % 16, y = (i / 16) | 0;
+      const v = (Math.random() * 30 - 15) | 0;
+      g.fillStyle = 'rgb(' + (93+v) + ',' + (156+v) + ',' + (58+v) + ')';
+      g.fillRect(x, y, 1, 1);
+    }
+  });
+  const grassSideTex = rngCanvas(g => {
+    g.fillStyle = '#8b5a2b'; g.fillRect(0,0,16,16);
+    noiseFill(g, [139,90,43], 14);
+    for (let y = 0; y < 4; y++)
+      for (let x = 0; x < 16; x++) {
+        const v = (Math.random() * 28 - 14) | 0;
+        g.fillStyle = 'rgb(' + (93+v) + ',' + (156+v) + ',' + (58+v) + ')';
+        g.fillRect(x, y, 1, 1);
+      }
+    for (let x = 0; x < 16; x++)
+      if (Math.random() < 0.4) {
+        const v = (Math.random() * 28 - 14) | 0;
+        g.fillStyle = 'rgb(' + (93+v) + ',' + (156+v) + ',' + (58+v) + ')';
+        g.fillRect(x, 4 + ((Math.random()*2)|0), 1, 1);
+      }
+  });
+  // Wood (log): brown bark with vertical grain stripes
+  const woodTex = rngCanvas(g => {
+    g.fillStyle = '#6b4a2a'; g.fillRect(0,0,16,16);
+    noiseFill(g, [107,74,42], 12);
+    // vertical bark streaks
+    for (let x = 0; x < 16; x += 3) {
+      const v = (Math.random() * 20 - 10) | 0;
+      g.fillStyle = 'rgb(' + (80+v) + ',' + (55+v) + ',' + (30+v) + ')';
+      for (let y = 0; y < 16; y++) if (Math.random() < 0.7) g.fillRect(x, y, 1, 1);
+    }
+  });
+  // Leaves: dark green pixel noise, slightly mottled
+  const leavesTex = rngCanvas(g => {
+    g.fillStyle = '#2e6b1f'; g.fillRect(0,0,16,16);
+    for (let i = 0; i < 256; i++) {
+      const x = i % 16, y = (i / 16) | 0;
+      const v = (Math.random() * 36 - 18) | 0;
+      g.fillStyle = 'rgb(' + (46+v) + ',' + (107+v) + ',' + (31+v) + ')';
+      g.fillRect(x, y, 1, 1);
+    }
+  });
+
+  const grassTopMat = new THREE.MeshLambertMaterial({ map: grassTopTex, side: THREE.DoubleSide });
+  const grassSideMat = new THREE.MeshLambertMaterial({ map: grassSideTex, side: THREE.DoubleSide });
+  const dirtMat = new THREE.MeshLambertMaterial({ map: dirtTex, side: THREE.DoubleSide });
+  const stoneMat = new THREE.MeshLambertMaterial({ map: stoneTex, side: THREE.DoubleSide });
+  const woodMat = new THREE.MeshLambertMaterial({ map: woodTex, side: THREE.DoubleSide });
+  const leavesMat = new THREE.MeshLambertMaterial({ map: leavesTex, side: THREE.DoubleSide });
+  const waterMat = new THREE.MeshLambertMaterial({
+    color: 0x3a7ad8, transparent: true, opacity: 0.5,
+    side: THREE.DoubleSide, depthWrite: false
+  });
+
+  // ---------- Simplex Noise (2D, self-contained) ----------
+  const Noise = (() => {
+    const grad3 = [[1,1,0],[-1,1,0],[1,-1,0],[-1,-1,0],
+                   [1,0,1],[-1,0,1],[1,0,-1],[-1,0,-1],
+                   [0,1,1],[0,-1,1],[0,1,-1],[0,-1,-1]];
+    const perm = new Uint8Array(512);
+    const permMod12 = new Uint8Array(512);
+    function seed(s) {
+      const p = new Uint8Array(256);
+      for (let i = 0; i < 256; i++) p[i] = i;
+      for (let i = 255; i > 0; i--) {
+        s = (s * 16807) % 2147483647;
+        const n = s % (i + 1);
+        const t = p[i]; p[i] = p[n]; p[n] = t;
+      }
+      for (let i = 0; i < 512; i++) { perm[i] = p[i & 255]; permMod12[i] = perm[i] % 12; }
+    }
+    function noise2D(xin, yin) {
+      const F2 = 0.5 * (Math.sqrt(3) - 1);
+      const G2 = (3 - Math.sqrt(3)) / 6;
+      let n0 = 0, n1 = 0, n2 = 0;
+      const s = (xin + yin) * F2;
+      const i = Math.floor(xin + s);
+      const j = Math.floor(yin + s);
+      const t = (i + j) * G2;
+      const X0 = i - t, Y0 = j - t;
+      const x0 = xin - X0, y0 = yin - Y0;
+      let i1, j1;
+      if (x0 > y0) { i1 = 1; j1 = 0; } else { i1 = 0; j1 = 1; }
+      const x1 = x0 - i1 + G2, y1 = y0 - j1 + G2;
+      const x2 = x0 - 1 + 2 * G2, y2 = y0 - 1 + 2 * G2;
+      const ii = i & 255, jj = j & 255;
+      const gi0 = permMod12[ii + perm[jj]];
+      const gi1 = permMod12[ii + i1 + perm[jj + j1]];
+      const gi2 = permMod12[ii + 1 + perm[jj + 1]];
+      let t0 = 0.5 - x0 * x0 - y0 * y0;
+      if (t0 >= 0) { t0 *= t0; const g = grad3[gi0]; n0 = t0 * t0 * (g[0] * x0 + g[1] * y0); }
+      let t1 = 0.5 - x1 * x1 - y1 * y1;
+      if (t1 >= 0) { t1 *= t1; const g = grad3[gi1]; n1 = t1 * t1 * (g[0] * x1 + g[1] * y1); }
+      let t2 = 0.5 - x2 * x2 - y2 * y2;
+      if (t2 >= 0) { t2 *= t2; const g = grad3[gi2]; n2 = t2 * t2 * (g[0] * x2 + g[1] * y2); }
+      return 70 * (n0 + n1 + n2);
+    }
+    function fbm(x, y, octaves) {
+      let total = 0, freq = 1, amp = 1, max = 0;
+      for (let o = 0; o < octaves; o++) {
+        total += noise2D(x * freq, y * freq) * amp;
+        max += amp;
+        amp *= 0.5;
+        freq *= 2;
+      }
+      return total / max;
+    }
+    return { seed, noise2D, fbm };
+  })();
+
+  // ---------- World data ----------
+  const blockMap = new Map();   // "x,y,z" -> type (terrain)
+  const waterSet = new Set();   // "x,y,z" (water, non-solid for collision)
+  const k = (x, y, z) => x + ',' + y + ',' + z;
+  function isSolid(x, y, z) {
+    if (y < 0) return true;        // hide bottom faces of the world floor
+    if (y >= SIZE) return false;
+    return blockMap.has(k(x, y, z));
+  }
+  function isWater(x, y, z) {
+    if (y < 0 || y >= SIZE) return false;
+    return waterSet.has(k(x, y, z));
+  }
+  // Opaque = terrain or water (used for face culling of both terrain & water)
+  function isOpaque(x, y, z) {
+    if (y < 0) return true;
+    if (y >= SIZE) return false;
+    return blockMap.has(k(x, y, z)) || waterSet.has(k(x, y, z));
+  }
+  const inBounds = (x, y, z) =>
+    x >= 0 && x < SIZE && y >= 0 && y < SIZE && z >= 0 && z < SIZE;
+
+  function setBlock(x, y, z, type) {
+    if (!inBounds(x, y, z)) return;
+    blockMap.set(k(x, y, z), type);
+  }
+  function removeBlock(x, y, z) {
+    blockMap.delete(k(x, y, z));
+  }
+
+  // ---------- Face definitions ----------
+  // Each face: dir (outward normal), 4 corner offsets (CCW from outside), material class
+  const FACES = [
+    { dir: [ 1, 0, 0], c: [[1,0,0],[1,0,1],[1,1,1],[1,1,0]] }, // +X
+    { dir: [-1, 0, 0], c: [[0,0,1],[0,0,0],[0,1,0],[0,1,1]] }, // -X
+    { dir: [ 0, 1, 0], c: [[0,1,1],[1,1,1],[1,1,0],[0,1,0]] }, // +Y top
+    { dir: [ 0,-1, 0], c: [[0,0,0],[1,0,0],[1,0,1],[0,0,1]] }, // -Y bottom
+    { dir: [ 0, 0, 1], c: [[1,0,1],[0,0,1],[0,1,1],[1,1,1]] }, // +Z
+    { dir: [ 0, 0,-1], c: [[0,0,0],[1,0,0],[1,1,0],[0,1,0]] }, // -Z
+  ];
+
+  // ---------- Merged geometry (face-culled) ----------
+  const worldGroup = new THREE.Group();
+  scene.add(worldGroup);
+
+  function makeMesh(material) {
+    const g = new THREE.BufferGeometry();
+    const m = new THREE.Mesh(g, material);
+    m.frustumCulled = false;
+    worldGroup.add(m);
+    return m;
+  }
+  const grassTopMesh = makeMesh(grassTopMat);
+  const grassSideMesh = makeMesh(grassSideMat);
+  const dirtMesh = makeMesh(dirtMat);
+  const stoneMesh = makeMesh(stoneMat);
+  const woodMesh = makeMesh(woodMat);
+  const leavesMesh = makeMesh(leavesMat);
+  const waterMesh = makeMesh(waterMat);
+  waterMesh.renderOrder = 2;
+
+  function buildGeometry() {
+    const bufs = {
+      grassTop:  { pos: [], norm: [], uv: [], idx: [] },
+      grassSide: { pos: [], norm: [], uv: [], idx: [] },
+      dirt:      { pos: [], norm: [], uv: [], idx: [] },
+      stone:     { pos: [], norm: [], uv: [], idx: [] },
+      wood:      { pos: [], norm: [], uv: [], idx: [] },
+      leaves:    { pos: [], norm: [], uv: [], idx: [] },
+      water:     { pos: [], norm: [], uv: [], idx: [] },
+    };
+
+    function pushFace(buf, x, y, z, f) {
+      const base = buf.pos.length / 3;
+      for (const c of f.c) {
+        buf.pos.push(x + c[0], y + c[1], z + c[2]);
+        buf.norm.push(f.dir[0], f.dir[1], f.dir[2]);
+      }
+      buf.uv.push(0, 0, 1, 0, 1, 1, 0, 1);
+      buf.idx.push(base, base + 1, base + 2, base, base + 2, base + 3);
+    }
+
+    for (const [key, type] of blockMap) {
+      const parts = key.split(',');
+      const x = +parts[0], y = +parts[1], z = +parts[2];
+      for (const f of FACES) {
+        const nx = x + f.dir[0], ny = y + f.dir[1], nz = z + f.dir[2];
+        // Only cull terrain faces against SOLID neighbors. Water is
+        // transparent ("special air"), so faces touching water must stay
+        // rendered — otherwise the raycaster has nothing to hit underwater
+        // and blocks can't be placed/broken there.
+        if (isSolid(nx, ny, nz)) continue;
+
+        let target;
+        if (type === STONE) target = 'stone';
+        else if (type === WOOD) target = 'wood';
+        else if (type === LEAVES) target = 'leaves';
+        else if (f.dir[1] === 1) target = (type === GRASS) ? 'grassTop' : 'dirt';
+        else if (f.dir[1] === -1) target = 'dirt';
+        else target = (type === GRASS) ? 'grassSide' : 'dirt';
+        pushFace(bufs[target], x, y, z, f);
+      }
+    }
+
+    // Water faces: render only where exposed to air (neither terrain nor water)
+    for (const key of waterSet) {
+      const parts = key.split(',');
+      const x = +parts[0], y = +parts[1], z = +parts[2];
+      for (const f of FACES) {
+        const nx = x + f.dir[0], ny = y + f.dir[1], nz = z + f.dir[2];
+        if (isOpaque(nx, ny, nz)) continue;
+        pushFace(bufs.water, x, y, z, f);
+      }
+    }
+
+    const map = [
+      [grassTopMesh, bufs.grassTop],
+      [grassSideMesh, bufs.grassSide],
+      [dirtMesh, bufs.dirt],
+      [stoneMesh, bufs.stone],
+      [woodMesh, bufs.wood],
+      [leavesMesh, bufs.leaves],
+      [waterMesh, bufs.water],
+    ];
+    for (const [mesh, buf] of map) {
+      const g = mesh.geometry;
+      g.setAttribute('position', new THREE.Float32BufferAttribute(buf.pos, 3));
+      g.setAttribute('normal', new THREE.Float32BufferAttribute(buf.norm, 3));
+      g.setAttribute('uv', new THREE.Float32BufferAttribute(buf.uv, 2));
+      g.setIndex(buf.idx);
+      g.computeBoundingSphere();
+    }
+  }
+
+  // ---------- Generate smooth terrain ----------
+  Noise.seed(1337);
+  const NOISE_SCALE = 0.05;    // low frequency -> broad, gentle hills
+  const BASE_HEIGHT = 3;
+  const AMPLITUDE = 7;         // modest amplitude
+  const OCTAVES = 4;
+
+  const raw = [];
+  for (let x = 0; x < SIZE; x++) {
+    raw[x] = [];
+    for (let z = 0; z < SIZE; z++) {
+      const n = Noise.fbm(x * NOISE_SCALE, z * NOISE_SCALE, OCTAVES); // ~[-1,1]
+      const t = (n + 1) * 0.5;
+      const smoothT = t * t * (3 - 2 * t); // smoothstep -> less jagged
+      raw[x][z] = BASE_HEIGHT + smoothT * AMPLITUDE;
+    }
+  }
+
+  // 3x3 box smoothing (one pass) to soften slopes while keeping relief
+  function smoothPass(src) {
+    const dst = [];
+    for (let x = 0; x < SIZE; x++) {
+      dst[x] = [];
+      for (let z = 0; z < SIZE; z++) {
+        let sum = 0, cnt = 0;
+        for (let dx = -1; dx <= 1; dx++)
+          for (let dz = -1; dz <= 1; dz++) {
+            const nx = x + dx, nz = z + dz;
+            if (nx >= 0 && nx < SIZE && nz >= 0 && nz < SIZE) {
+              sum += src[nx][nz]; cnt++;
+            }
+          }
+        dst[x][z] = sum / cnt;
+      }
+    }
+    return dst;
+  }
+  const h = smoothPass(raw);
+
+  // Pass 1: build heightMap and collect all heights for sea-level calculation
+  const heightMap = [];
+  const allHeights = [];
+  for (let x = 0; x < SIZE; x++) {
+    heightMap[x] = [];
+    for (let z = 0; z < SIZE; z++) {
+      const v = Math.max(1, Math.min(SIZE - 2, Math.round(h[x][z])));
+      heightMap[x][z] = v;
+      allHeights.push(v);
+    }
+  }
+  allHeights.sort((a, b) => a - b);
+  const minH = allHeights[0];
+  // Sea level sits at the ~35th percentile of terrain height.
+  // This guarantees the lowest valleys/basins are filled with water,
+  // never producing a single floating water block.
+  const SEA_LEVEL = Math.max(
+    minH + 1,
+    allHeights[Math.floor(allHeights.length * 0.35)]
+  );
+
+  // Pass 2: fill terrain blocks + water columns in low areas
+  // Layer layout from surface down: grass (1) -> dirt (2) -> dirt (3) -> stone (4+)
+  for (let x = 0; x < SIZE; x++) {
+    for (let z = 0; z < SIZE; z++) {
+      const v = heightMap[x][z];
+      for (let y = 0; y <= v; y++) {
+        let type;
+        if (y === v) type = GRASS;            // surface: grass
+        else if (y >= v - 2) type = DIRT;     // 2 dirt layers below grass
+        else type = STONE;                    // 4th layer down and deeper: stone
+        setBlock(x, y, z, type);
+      }
+      // Fill every cell from terrain top+1 up to sea level with water
+      if (v < SEA_LEVEL) {
+        for (let y = v + 1; y <= SEA_LEVEL; y++) waterSet.add(k(x, y, z));
+      }
+    }
+  }
+
+  // ---------- Trees ----------
+  // Place a tree on a grass surface block. Trunk = wood, canopy = leaves.
+  // Only spawns on land (surface >= sea level) and never overwrites existing
+  // solid blocks (so the trunk cell is preserved as wood).
+  function placeTree(tx, tz, baseY) {
+    const trunkH = 4 + ((Math.random() * 3) | 0); // 4..6
+    const top = baseY + trunkH;
+    // Trunk
+    for (let y = baseY + 1; y <= top; y++) setBlock(tx, y, tz, WOOD);
+    // Canopy layers (classic small oak shape)
+    const leafOffsets = [
+      // [dy, radius, cutCorners]
+      { dy: trunkH - 2, r: 2, cut: true  },  // bottom layer: 5x5 minus corners
+      { dy: trunkH - 1, r: 2, cut: true  },  // 5x5 minus corners
+      { dy: trunkH,     r: 1, cut: false },  // top layer: 3x3 full
+      { dy: trunkH + 1, r: 1, cut: true  },  // cap: 3x3 minus corners
+    ];
+    for (const lo of leafOffsets) {
+      const ly = baseY + lo.dy;
+      for (let dx = -lo.r; dx <= lo.r; dx++) {
+        for (let dz = -lo.r; dz <= lo.r; dz++) {
+          if (lo.cut && Math.abs(dx) === lo.r && Math.abs(dz) === lo.r) continue;
+          const lx = tx + dx, lz = tz + dz;
+          // don't overwrite the trunk or any existing solid block
+          if (!blockMap.has(k(lx, ly, lz))) setBlock(lx, ly, lz, LEAVES);
+        }
+      }
+    }
+  }
+  // ~3.5% of land columns get a tree; never underwater, keep 2-block margin
+  // from the map edge so canopies stay in bounds.
+  for (let x = 2; x < SIZE - 2; x++) {
+    for (let z = 2; z < SIZE - 2; z++) {
+      const v = heightMap[x][z];
+      if (v < SEA_LEVEL) continue;          // no trees in water
+      if (Math.random() < 0.035) placeTree(x, z, v);
+    }
+  }
+
+  buildGeometry();
+
+  // ---------- Water spread (fluid flow) ----------
+  const MAX_WATER = 4000;         // hard cap to avoid flooding the whole map
+  const MAX_SPREAD = 7;           // max horizontal distance (in blocks) from a water source
+  const spreadQueue = [];
+  const waterDist = new Map();    // key -> horizontal steps from its source block
+  let spreadTimer = 0;
+
+  function restartWaterSpread() {
+    spreadQueue.length = 0;
+    // Re-queue every existing water block so it can re-evaluate spreading
+    // after a block change. Existing distances are PRESERVED (a water block
+    // that already spread 7 steps won't magically get a fresh range). New
+    // water blocks (not yet in waterDist) are treated as sources (dist 0).
+    for (const key of waterSet) {
+      if (!waterDist.has(key)) waterDist.set(key, 0);
+      spreadQueue.push(key);
+    }
+  }
+  restartWaterSpread();
+
+  function tickWaterSpread(dt) {
+    spreadTimer += dt;
+    if (spreadTimer < 0.12) return;        // process a batch every ~120ms
+    spreadTimer = 0;
+
+    if (spreadQueue.length === 0 || waterSet.size >= MAX_WATER) return;
+
+    const dirs = [[1, 0, 0], [-1, 0, 0], [0, 0, 1], [0, 0, -1]];
+    const batch = 60;
+    let processed = 0;
+    let changed = false;
+
+    while (spreadQueue.length > 0 && processed < batch && waterSet.size < MAX_WATER) {
+      const key = spreadQueue.shift();
+      processed++;
+      if (!waterSet.has(key)) continue;    // cell no longer water
+      const dist = waterDist.get(key);
+      if (dist === undefined) continue;    // should not happen
+
+      const parts = key.split(',');
+      const x = +parts[0], y = +parts[1], z = +parts[2];
+
+      // Flow down first. Vertical fall preserves the horizontal distance
+      // from the source (water can fall indefinitely).
+      const dk = k(x, y - 1, z);
+      if (y - 1 >= 0 && !isOpaque(x, y - 1, z) && !waterSet.has(dk)) {
+        waterSet.add(dk);
+        waterDist.set(dk, dist);
+        spreadQueue.push(dk);
+        changed = true;
+        continue; // falling water takes priority
+      }
+
+      // Spread horizontally: each horizontal step costs +1 distance.
+      // Stop when already at MAX_SPREAD so water never spreads beyond 7
+      // blocks horizontally from its source.
+      if (dist >= MAX_SPREAD) continue;
+
+      for (const [dx, , dz] of dirs) {
+        const nx = x + dx, nz = z + dz;
+        if (!inBounds(nx, y, nz)) continue;
+        const nkey = k(nx, y, nz);
+        if (waterSet.has(nkey) || isOpaque(nx, y, nz)) continue;
+        // need support: solid or water directly below the target
+        if (!isOpaque(nx, y - 1, nz) && !waterSet.has(k(nx, y - 1, nz))) continue;
+        waterSet.add(nkey);
+        waterDist.set(nkey, dist + 1);
+        spreadQueue.push(nkey);
+        changed = true;
+        if (waterSet.size >= MAX_WATER) break;
+      }
+    }
+
+    if (changed) buildGeometry();
+    if (waterSet.size >= MAX_WATER) spreadQueue.length = 0;
+  }
+
+  // ---------- Target highlight ----------
+  const highlight = new THREE.LineSegments(
+    new THREE.EdgesGeometry(new THREE.BoxGeometry(1.004, 1.004, 1.004)),
+    new THREE.LineBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.6 })
+  );
+  highlight.visible = false;
+  scene.add(highlight);
+
+  // ---------- Pointer lock controls ----------
+  const controls = new THREE.PointerLockControls(camera, renderer.domElement);
+  const overlay = document.getElementById('overlay');
+  const underwaterEl = document.getElementById('underwater');
+  const sneakEl = document.getElementById('sneak-indicator');
+  let inventoryOpen = false;
+  overlay.addEventListener('click', () => controls.lock());
+  controls.addEventListener('lock', () => overlay.classList.add('hidden'));
+  controls.addEventListener('unlock', () => {
+    // Only show the start overlay when not opening the inventory.
+    if (!inventoryOpen) overlay.classList.remove('hidden');
+  });
+
+  // ---------- Player physics ----------
+  const PLAYER_HALF_W = 0.3;
+  const PLAYER_HEIGHT = 1.8;
+  const EYE_HEIGHT = 1.62;
+  const MOVE_SPEED = 4.8;
+  const GRAVITY = 24;
+  const JUMP_SPEED = 8.4;
+  const SNEAK_EYE_DROP = 0.4;      // camera lowers by this many units while sneaking
+  const SNEAK_SPEED_MULT = 0.3;    // movement speed multiplier while sneaking
+
+  const spawnX = 32, spawnZ = 32;
+  const spawnY = heightMap[spawnX][spawnZ] + 1;
+  const feet = new THREE.Vector3(spawnX + 0.5, spawnY, spawnZ + 0.5);
+  const velocity = new THREE.Vector3();
+  let onGround = false;
+
+  function collides(fx, fy, fz) {
+    const minX = Math.floor(fx - PLAYER_HALF_W);
+    const maxX = Math.floor(fx + PLAYER_HALF_W);
+    const minY = Math.floor(fy);
+    const maxY = Math.floor(fy + PLAYER_HEIGHT);
+    const minZ = Math.floor(fz - PLAYER_HALF_W);
+    const maxZ = Math.floor(fz + PLAYER_HALF_W);
+    for (let y = minY; y <= maxY; y++)
+      for (let x = minX; x <= maxX; x++)
+        for (let z = minZ; z <= maxZ; z++)
+          if (isSolid(x, y, z)) return true;
+    return false;
+  }
+
+  // Edge-protection for sneaking: returns true if any cell under the player's
+  // footprint at (px, pz) is a solid block (i.e. the player would still be
+  // supported). The support layer is the block directly below the feet.
+  function hasSupport(px, pz) {
+    const supportY = Math.floor(feet.y) - 1;
+    const minX = Math.floor(px - PLAYER_HALF_W);
+    const maxX = Math.floor(px + PLAYER_HALF_W);
+    const minZ = Math.floor(pz - PLAYER_HALF_W);
+    const maxZ = Math.floor(pz + PLAYER_HALF_W);
+    for (let x = minX; x <= maxX; x++)
+      for (let z = minZ; z <= maxZ; z++)
+        if (isSolid(x, supportY, z) || isSolid(x, supportY + 1, z)) return true;
+    return false;
+  }
+
+  const keys = {};
+  window.addEventListener('keydown', e => {
+    keys[e.code] = true;
+    if (e.code === 'KeyE') toggleInventory();
+    // Number keys 1-9 directly select the corresponding hotbar slot.
+    if (e.code.startsWith('Digit')) {
+      const n = parseInt(e.code.slice(5), 10);
+      if (n >= 1 && n <= HOTBAR_SIZE) {
+        hotbarIndex = n - 1;
+        renderHotbar();
+        showItemName();
+      }
+    }
+  });
+  window.addEventListener('keyup',   e => { keys[e.code] = false; });
+  window.addEventListener('blur', () => { for (const k in keys) keys[k] = false; });
+
+  // ---------- Inventory & Hotbar ----------
+  // Available item types (infinite count). color = representative swatch color.
+  const ITEMS = [
+    { id: GRASS,  name: '草方块', color: '#5d9c3a' },
+    { id: DIRT,   name: '泥土',   color: '#8b5a2b' },
+    { id: STONE,  name: '石头',   color: '#8a8a8a' },
+    { id: WATER,  name: '水',     color: '#3a7ad8' },
+    { id: WOOD,   name: '木头',   color: '#6b4a2a' },
+    { id: LEAVES, name: '树叶',   color: '#2e6b1f' },
+  ];
+  const ITEM_BY_ID = {};
+  for (const it of ITEMS) ITEM_BY_ID[it.id] = it;
+
+  const HOTBAR_SIZE = 9;
+  // 9 hotbar slots. Each item type appears exactly once; the remaining
+  // slots are left empty.
+  const hotbarSlots = [GRASS, DIRT, STONE, WATER, WOOD, LEAVES, null, null, null];
+  let hotbarIndex = 0;
+
+  // Inventory storage: 27 slots (9x3). Pre-populated with the 6 block types
+  // so they can be dragged into the hotbar.
+  const invSlots = [GRASS, DIRT, STONE, WATER, WOOD, LEAVES,
+                    null, null, null, null, null, null,
+                    null, null, null, null, null, null,
+                    null, null, null, null, null, null,
+                    null, null, null];
+
+  const hotbarEl = document.getElementById('hotbar');
+  const invGridEl = document.getElementById('inv-grid');
+  const inventoryEl = document.getElementById('inventory');
+  const itemNameEl = document.getElementById('item-name');
+
+  function swatch(color) {
+    const d = document.createElement('div');
+    d.className = 'swatch';
+    d.style.background = color;
+    return d;
+  }
+
+  function renderHotbar() {
+    hotbarEl.innerHTML = '';
+    for (let i = 0; i < HOTBAR_SIZE; i++) {
+      const slot = document.createElement('div');
+      slot.className = 'slot' + (i === hotbarIndex ? ' active' : '');
+      slot.dataset.container = 'hotbar';
+      slot.dataset.index = i;
+      const id = hotbarSlots[i];
+      if (id != null && ITEM_BY_ID[id]) {
+        const sw = swatch(ITEM_BY_ID[id].color);
+        slot.appendChild(sw);
+        slot.title = ITEM_BY_ID[id].name;
+        attachDrag(slot, 'hotbar', i);
+      }
+      hotbarEl.appendChild(slot);
+    }
+  }
+
+  function renderInventory() {
+    invGridEl.innerHTML = '';
+    for (let i = 0; i < 27; i++) {
+      const slot = document.createElement('div');
+      slot.className = 'slot';
+      slot.dataset.container = 'inv';
+      slot.dataset.index = i;
+      const id = invSlots[i];
+      if (id != null && ITEM_BY_ID[id]) {
+        const sw = swatch(ITEM_BY_ID[id].color);
+        slot.appendChild(sw);
+        slot.title = ITEM_BY_ID[id].name;
+        // Pick/drag is handled centrally in the mousedown/mouseup handlers
+        // (see attachDrag + document mouseup). A plain click (no move) on an
+        // inventory slot performs a creative-style pick into the selected
+        // hotbar slot; a drag performs a swap.
+        attachDrag(slot, 'inv', i);
+      }
+      invGridEl.appendChild(slot);
+    }
+  }
+
+  function toggleInventory() {
+    inventoryOpen = !inventoryOpen;
+    if (inventoryOpen) {
+      inventoryEl.classList.add('open');
+      if (controls.isLocked) controls.unlock();
+    } else {
+      inventoryEl.classList.remove('open');
+      controls.lock(); // re-lock pointer (user gesture = keydown)
+    }
+  }
+
+  // ---------- Drag & drop (swap two slots) ----------
+  // Uses JS mouse events + an absolutely-positioned ghost element that follows
+  // the cursor. Dropping on another slot swaps their contents. Empty slots are
+  // valid drop targets (they have data-container / data-index).
+  let dragSource = null;          // { container, index }
+  let dragGhost = null;           // floating swatch following the cursor
+  let dragMoved = false;          // suppress click if the mouse actually moved
+
+  function getSlotData(container, index) {
+    return container === 'hotbar' ? hotbarSlots[index] : invSlots[index];
+  }
+  function setSlotData(container, index, value) {
+    if (container === 'hotbar') hotbarSlots[index] = value;
+    else invSlots[index] = value;
+  }
+
+  function attachDrag(slot, container, index) {
+    slot.addEventListener('mousedown', (e) => {
+      if (e.button !== 0) return;            // only left mouse button
+      if (!inventoryOpen) return;            // drag only while inventory is open
+      e.preventDefault();                     // don't let the canvas see it
+      e.stopPropagation();
+      const id = getSlotData(container, index);
+      if (id == null) return;                 // nothing to drag
+
+      dragSource = { container, index };
+      dragMoved = false;
+
+      // Create the ghost swatch following the cursor.
+      const item = ITEM_BY_ID[id];
+      dragGhost = document.createElement('div');
+      dragGhost.className = 'swatch drag-ghost';
+      dragGhost.style.background = item.color;
+      dragGhost.style.position = 'fixed';
+      dragGhost.style.left = (e.clientX - 18) + 'px';
+      dragGhost.style.top = (e.clientY - 18) + 'px';
+      dragGhost.style.pointerEvents = 'none';
+      dragGhost.style.zIndex = '100';
+      dragGhost.style.opacity = '0.85';
+      document.body.appendChild(dragGhost);
+
+      slot.classList.add('dragging');
+    });
+  }
+
+  document.addEventListener('mousemove', (e) => {
+    if (!dragSource) return;
+    if (dragGhost) {
+      dragGhost.style.left = (e.clientX - 18) + 'px';
+      dragGhost.style.top = (e.clientY - 18) + 'px';
+    }
+    dragMoved = true;
+  });
+
+  document.addEventListener('mouseup', (e) => {
+    if (!dragSource) return;
+    const src = dragSource;
+    dragSource = null;
+
+    // Locate the slot under the cursor (element with data-container).
+    const el = document.elementFromPoint(e.clientX, e.clientY);
+    let targetSlot = el;
+    while (targetSlot && !targetSlot.dataset) targetSlot = targetSlot.parentElement;
+    while (targetSlot && targetSlot.dataset && targetSlot.dataset.container == null) {
+      targetSlot = targetSlot.parentElement;
+    }
+
+    const moved = dragMoved;
+
+    if (targetSlot && targetSlot.dataset && targetSlot.dataset.container != null) {
+      const tContainer = targetSlot.dataset.container;
+      const tIndex = parseInt(targetSlot.dataset.index, 10);
+      const sameSlot = (tContainer === src.container && tIndex === src.index);
+
+      if (!moved && sameSlot && src.container === 'inv') {
+        // Plain click on an inventory slot → creative pick: put this item
+        // type into the currently selected hotbar slot, dedup duplicates.
+        const id = getSlotData(src.container, src.index);
+        for (let s = 0; s < HOTBAR_SIZE; s++) {
+          if (s !== hotbarIndex && hotbarSlots[s] === id) hotbarSlots[s] = null;
+        }
+        hotbarSlots[hotbarIndex] = id;
+      } else if (moved || !sameSlot) {
+        // Drag (or click-release on a different slot) → swap contents.
+        const a = getSlotData(src.container, src.index);
+        const b = getSlotData(tContainer, tIndex);
+        setSlotData(src.container, src.index, b);
+        setSlotData(tContainer, tIndex, a);
+      }
+    }
+
+    // Clean up ghost + highlight, re-render both panels.
+    if (dragGhost) { dragGhost.remove(); dragGhost = null; }
+    document.querySelectorAll('.slot.dragging').forEach(s => s.classList.remove('dragging'));
+    dragMoved = false;
+    renderHotbar();
+    renderInventory();
+  });
+
+  let itemNameTimer = null;
+  function showItemName() {
+    const id = hotbarSlots[hotbarIndex];
+    const item = id != null ? ITEM_BY_ID[id] : null;
+    itemNameEl.textContent = item ? item.name : '';
+    itemNameEl.classList.add('show');
+    // Reset any pending fade-out so repeated switches keep it visible.
+    if (itemNameTimer) clearTimeout(itemNameTimer);
+    itemNameTimer = setTimeout(() => {
+      itemNameEl.classList.remove('show');
+      itemNameTimer = null;
+    }, 1300);
+  }
+
+  function cycleHotbar(dir) {
+    // dir > 0: next slot (down); dir < 0: prev slot (up). Infinite loop.
+    hotbarIndex = (hotbarIndex + dir + HOTBAR_SIZE) % HOTBAR_SIZE;
+    renderHotbar();
+    showItemName();
+  }
+
+  window.addEventListener('wheel', (e) => {
+    if (inventoryOpen) return; // don't switch while inventory is open
+    e.preventDefault();
+    cycleHotbar(e.deltaY > 0 ? 1 : -1);
+  }, { passive: false });
+
+  renderHotbar();
+  renderInventory();
+
+  // ---------- Raycasting ----------
+  const raycaster = new THREE.Raycaster();
+  raycaster.far = 6;
+  const camDir = new THREE.Vector3();
+  // Terrain is the only raycast target. Water is purely visual — it never
+  // occludes the ray and can never be the place/break target, so you cannot
+  // place blocks on the water surface.
+  const terrainMeshes = [grassTopMesh, grassSideMesh, dirtMesh, stoneMesh, woodMesh, leavesMesh];
+
+  function hitToBlock(hit) {
+    const p = hit.point;
+
+    // The hit point lies on a face plane, so one of its coordinates is
+    // (almost) an integer. The axis closest to an integer is the face
+    // normal axis. This avoids relying on hit.face.normal (which can be
+    // flipped by DoubleSide materials).
+    const fx = Math.abs(p.x - Math.round(p.x));
+    const fy = Math.abs(p.y - Math.round(p.y));
+    const fz = Math.abs(p.z - Math.round(p.z));
+
+    // Outward face normal points toward the incoming ray, so its sign on
+    // the face axis is opposite to the ray direction component on that axis.
+    let nx = 0, ny = 0, nz = 0;
+    if (fx <= fy && fx <= fz) {
+      nx = camDir.x >= 0 ? -1 : 1;
+    } else if (fy <= fz) {
+      ny = camDir.y >= 0 ? -1 : 1;
+    } else {
+      nz = camDir.z >= 0 ? -1 : 1;
+    }
+
+    // Step from the hit point opposite to the outward normal (into the block)
+    // and floor to get the struck block's coordinates.
+    const EPS = 0.001;
+    const bx = Math.floor(p.x - nx * EPS);
+    const by = Math.floor(p.y - ny * EPS);
+    const bz = Math.floor(p.z - nz * EPS);
+
+    return { x: bx, y: by, z: bz, nx, ny, nz };
+  }
+
+  function pickBlock() {
+    camera.getWorldDirection(camDir);
+    raycaster.set(camera.position, camDir);
+
+    // Only terrain is targetable. Water is ignored by the raycaster — the
+    // ray passes straight through it, so blocks below/behind water can be
+    // hit, but open water (no terrain behind) yields no target.
+    const terrainHits = raycaster.intersectObjects(terrainMeshes, false);
+    if (terrainHits.length > 0) return hitToBlock(terrainHits[0]);
+
+    return null;
+  }
+
+  function placeBlock(hit) {
+    const type = hotbarSlots[hotbarIndex];
+    if (type == null) return; // empty hotbar slot -> nothing to place
+    const tx = hit.x + Math.round(hit.nx);
+    const ty = hit.y + Math.round(hit.ny);
+    const tz = hit.z + Math.round(hit.nz);
+    if (!inBounds(tx, ty, tz)) return;
+    const key = k(tx, ty, tz);
+    if (type === WATER) {
+      // Water is non-solid ("special air"): goes into waterSet,
+      // cannot be placed inside an existing solid block.
+      if (blockMap.has(key)) return;
+      waterSet.add(key);
+      waterDist.set(key, 0); // player-placed water is a fresh source
+    } else {
+      // Solid block: displaces any water at the target cell.
+      if (blockMap.has(key)) return;
+      waterSet.delete(key);
+      waterDist.delete(key);
+      setBlock(tx, ty, tz, type);
+    }
+    buildGeometry();
+    restartWaterSpread();
+  }
+  function breakBlock(hit) {
+    const key = k(hit.x, hit.y, hit.z);
+    if (blockMap.has(key)) {
+      removeBlock(hit.x, hit.y, hit.z);
+    } else if (waterSet.has(key)) {
+      waterSet.delete(key); // remove a water block
+      waterDist.delete(key);
+    } else {
+      return;
+    }
+    buildGeometry();
+    restartWaterSpread(); // let water flow into the opened space
+  }
+
+  renderer.domElement.addEventListener('mousedown', (e) => {
+    if (!controls.isLocked) return;
+    const hit = pickBlock();
+    if (!hit) return;
+    if (e.button === 0) breakBlock(hit);        // LMB: destroy block
+    else if (e.button === 2) placeBlock(hit);   // RMB: place block
+  });
+  renderer.domElement.addEventListener('contextmenu', e => e.preventDefault());
+
+  // ---------- Resize ----------
+  window.addEventListener('resize', () => {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  });
+
+  // ---------- Main loop ----------
+  const up = new THREE.Vector3(0, 1, 0);
+  const forward = new THREE.Vector3();
+  const right = new THREE.Vector3();
+  const wishDir = new THREE.Vector3();
+  let last = performance.now();
+
+  function animate() {
+    requestAnimationFrame(animate);
+    const now = performance.now();
+    let dt = (now - last) / 1000;
+    last = now;
+    if (dt > 0.05) dt = 0.05;
+
+    tickWaterSpread(dt);
+
+    if (controls.isLocked) {
+      camera.getWorldDirection(forward);
+      forward.y = 0; forward.normalize();
+      right.crossVectors(forward, up).normalize();
+      wishDir.set(0, 0, 0);
+      if (keys['KeyW']) wishDir.add(forward);
+      if (keys['KeyS']) wishDir.sub(forward);
+      if (keys['KeyD']) wishDir.add(right);
+      if (keys['KeyA']) wishDir.sub(right);
+      if (wishDir.lengthSq() > 0) wishDir.normalize();
+
+      // Water resistance: check the player's BODY cells (feet + torso),
+      // NOT the camera. As long as any body cell is water, speed is halved.
+      const fx = Math.floor(feet.x);
+      const fz = Math.floor(feet.z);
+      const fy0 = Math.floor(feet.y);
+      const inWater = isWater(fx, fy0, fz) || isWater(fx, fy0 + 1, fz);
+
+      // Sneak: hold Shift (left or right). Hold semantics, not toggle.
+      const sneaking = !!(keys['ShiftLeft'] || keys['ShiftRight']);
+
+      const speed = MOVE_SPEED
+        * (inWater ? 0.5 : 1.0)
+        * (sneaking ? SNEAK_SPEED_MULT : 1.0);
+
+      const dx = wishDir.x * speed * dt;
+      const dz = wishDir.z * speed * dt;
+
+      // Edge protection: while sneaking AND on the ground, block any
+      // horizontal move that would leave the player with no solid block
+      // under their footprint (i.e. walking off an edge). The player "sticks"
+      // to the edge instead of falling.
+      const protectEdge = sneaking && onGround;
+      if (dx !== 0) {
+        const nx = feet.x + dx;
+        if (!collides(nx, feet.y, feet.z) &&
+            !(protectEdge && !hasSupport(nx, feet.z))) {
+          feet.x = nx;
+        }
+      }
+      if (dz !== 0) {
+        const nz = feet.z + dz;
+        if (!collides(feet.x, feet.y, nz) &&
+            !(protectEdge && !hasSupport(feet.x, nz))) {
+          feet.z = nz;
+        }
+      }
+
+      if (keys['Space'] && onGround) { velocity.y = JUMP_SPEED; onGround = false; }
+
+      velocity.y -= GRAVITY * dt;
+      const ny = feet.y + velocity.y * dt;
+      if (!collides(feet.x, ny, feet.z)) {
+        feet.y = ny;
+        onGround = false;
+      } else {
+        if (velocity.y < 0) onGround = true;
+        velocity.y = 0;
+      }
+
+      // Camera height: drop the eye while sneaking for a clear visual cue.
+      const eyeY = EYE_HEIGHT - (sneaking ? SNEAK_EYE_DROP : 0);
+      camera.position.set(feet.x, feet.y + eyeY, feet.z);
+    }
+
+    // Underwater mask: if the camera's block is a water block, overlay a
+    // water-colored tint on the whole view.
+    const camInWater = isWater(
+      Math.floor(camera.position.x),
+      Math.floor(camera.position.y),
+      Math.floor(camera.position.z)
+    );
+    underwaterEl.classList.toggle('active', camInWater);
+
+    // Sneak visual indicator (hold Shift).
+    const isSneaking = !!(keys['ShiftLeft'] || keys['ShiftRight']);
+    sneakEl.classList.toggle('active', isSneaking);
+
+    const hit = pickBlock();
+    if (hit) {
+      highlight.position.set(hit.x + 0.5, hit.y + 0.5, hit.z + 0.5);
+      highlight.visible = true;
+    } else {
+      highlight.visible = false;
+    }
+
+    renderer.render(scene, camera);
+  }
+  animate();
+})();
+</script>
+
+
+</body></html>

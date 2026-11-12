@@ -1,0 +1,3392 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Minecraft Pre-Classic rd-132211 (HTML Remake)</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #78a7ff; }
+  canvas { display: block; }
+  #hud {
+    position: fixed; top: 10px; left: 12px;
+    font-family: "Courier New", "Lucida Console", monospace;
+    font-size: 14px; color: #fff;
+    text-shadow: 2px 2px 0 #000;
+    pointer-events: none; user-select: none; z-index: 10;
+    letter-spacing: 0.5px;
+  }
+  #crosshair {
+    position: fixed; top: 50%; left: 50%;
+    width: 20px; height: 20px; margin: -10px 0 0 -10px;
+    pointer-events: none; z-index: 10;
+  }
+  #crosshair::before, #crosshair::after {
+    content: ""; position: absolute; background: #fff;
+    box-shadow: 0 0 2px #000;
+  }
+  #crosshair::before { left: 50%; top: 0; width: 2px; height: 100%; margin-left: -1px; }
+  #crosshair::after  { top: 50%; left: 0; height: 2px; width: 100%; margin-top: -1px; }
+  /* Mining progress ring — a thin circular arc below the crosshair that
+     fills up as the targeted block is being mined. Hidden when idle. */
+  #mining-ring {
+    position: fixed; top: calc(50% + 18px); left: 50%;
+    width: 30px; height: 30px; margin: 0 0 0 -15px;
+    border-radius: 50%;
+    border: 3px solid rgba(255,255,255,0.25);
+    pointer-events: none; z-index: 10;
+    opacity: 0;
+    transition: opacity 0.1s linear;
+  }
+  #mining-ring.active { opacity: 1; }
+  /* Underwater mask: same color as water (0x3a7ad8), shown only while the
+     camera block is a water block. */
+  #underwater {
+    position: fixed; inset: 0;
+    background: rgba(58, 122, 216, 0.45);
+    pointer-events: none; z-index: 5;
+    opacity: 0;
+    transition: opacity 0.1s linear;
+  }
+  #underwater.active { opacity: 1; }
+  /* Sneak indicator */
+  #sneak-indicator {
+    position: fixed; bottom: 90px; left: 50%; transform: translateX(-50%);
+    font-family: "Courier New", monospace; font-size: 14px; color: #ffe066;
+    text-shadow: 2px 2px 0 #000; letter-spacing: 2px;
+    pointer-events: none; z-index: 10;
+    opacity: 0; transition: opacity 0.08s linear;
+  }
+  #sneak-indicator.active { opacity: 1; }
+  /* Item name tooltip (shown briefly above the hotbar on switch) */
+  #item-name {
+    position: fixed; bottom: 110px; left: 50%; transform: translateX(-50%);
+    font-family: "Courier New", monospace; font-size: 18px;
+    color: #ffffff;
+    text-shadow: 2px 2px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000;
+    pointer-events: none; z-index: 10;
+    opacity: 0;
+    transition: opacity 0.25s linear;
+    white-space: nowrap;
+  }
+  #item-name.show { opacity: 1; }
+  /* ---------- Hotbar (bottom 9-slot bar) ---------- */
+  #hotbar {
+    position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%);
+    display: flex; gap: 4px; padding: 6px;
+    background: rgba(0,0,0,0.55);
+    border: 2px solid #444; border-radius: 4px;
+    z-index: 10;
+  }
+  /* The floating bar is replaced by the row embedded in the inventory panel
+     whenever the inventory is open. */
+  #hotbar.hidden { display: none; }
+  #hotbar .slot {
+    width: 48px; height: 48px;
+    background: rgba(90,90,90,0.5);
+    border: 2px solid #666;
+    display: flex; align-items: center; justify-content: center;
+    position: relative;
+  }
+  #hotbar .slot.active {
+    border-color: #fff;
+    box-shadow: 0 0 10px rgba(255,255,255,0.7);
+  }
+  #hotbar .slot .swatch {
+    width: 36px; height: 36px;
+    box-shadow: inset 0 0 0 1px rgba(0,0,0,0.4);
+  }
+  /* ---------- First-person held item (bottom-right "hand") ---------- */
+  #hand-item {
+    position: fixed; right: 3vw; bottom: 6vh;
+    width: 15vw; height: 15vw;
+    pointer-events: none; z-index: 12;
+    display: none;
+    transform: rotate(-30deg) translateX(20px) translateY(10px);
+    transform-origin: 75% 95%;
+    filter: drop-shadow(0 6px 12px rgba(0,0,0,0.55));
+  }
+  #hand-item.visible { display: block; }
+  /* The swing animation lives on its own layer so it doesn't overwrite the
+     idle rotate(-30deg) pose above. */
+  #hand-swing { width: 100%; height: 100%; transform-origin: 75% 95%; }
+  #hand-swing.swinging { animation: hand-swing 0.24s ease-out; }
+  @keyframes hand-swing {
+    0%   { transform: translateY(0) rotate(0deg); }
+    45%  { transform: translateY(14%) rotate(26deg); }
+    100% { transform: translateY(0) rotate(0deg); }
+  }
+  #hand-icon { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; }
+  #hand-icon .hand-glyph {
+    font-family: monospace; font-weight: bold;
+    font-size: 11vw; line-height: 1; user-select: none;
+  }
+  #hand-icon .hand-block {
+    width: 100%; height: 100%;
+    box-shadow: inset 0 0 0 4px rgba(0,0,0,0.45);
+    display: flex; align-items: center; justify-content: center;
+  }
+  /* ---------- Damage vignette (red edge flash when hurt) ---------- */
+  #damage-flash {
+    position: fixed; inset: 0; pointer-events: none; z-index: 25;
+    opacity: 0;
+    background: radial-gradient(ellipse at center,
+      rgba(190,0,0,0) 42%, rgba(190,0,0,0.8) 100%);
+  }
+  #damage-flash.flash { animation: damage-flash 0.45s ease-out; }
+  @keyframes damage-flash {
+    0%   { opacity: 0; }
+    18%  { opacity: 1; }
+    100% { opacity: 0; }
+  }
+  /* ---------- Healing feedback (green +5 above the crosshair) ---------- */
+  #heal-toast {
+    position: fixed; left: 50%; top: calc(50% - 46px);
+    transform: translateX(-50%);
+    color: #4dff88; font-family: monospace; font-weight: bold; font-size: 22px;
+    text-shadow: 0 0 8px rgba(77,255,136,0.7), 0 2px 2px #000;
+    pointer-events: none; z-index: 26; opacity: 0;
+  }
+  #heal-toast.show { animation: heal-toast 0.9s ease-out; }
+  @keyframes heal-toast {
+    0%   { opacity: 0; transform: translate(-50%, 10px) scale(0.8); }
+    25%  { opacity: 1; transform: translate(-50%, 0) scale(1.15); }
+    100% { opacity: 0; transform: translate(-50%, -22px) scale(1); }
+  }
+  /* ---------- Day / night indicator (top-right) ---------- */
+  #time-indicator {
+    position: fixed; top: 14px; right: 16px; z-index: 12;
+    display: flex; align-items: center; gap: 8px;
+    padding: 5px 12px; border-radius: 4px;
+    background: rgba(0,0,0,0.45);
+    border: 2px solid rgba(255,255,255,0.22);
+    color: #fff; font-family: "Courier New", monospace;
+    font-size: 15px; letter-spacing: 1px;
+    user-select: none; pointer-events: none;
+    transition: color 0.4s;
+  }
+  #time-indicator #time-icon { font-size: 18px; line-height: 1; }
+  /* ---------- Inventory panel (9x3 grid) ---------- */
+  #inventory {
+    position: fixed; top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    display: none; flex-direction: column; gap: 12px;
+    padding: 18px;
+    background: rgba(18,18,18,0.94);
+    border: 3px solid #555; border-radius: 6px;
+    z-index: 30;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.6);
+  }
+  #inventory.open { display: flex; }
+  #inventory h2 {
+    color: #ddd; font-family: "Courier New", monospace;
+    font-size: 16px; text-align: center; letter-spacing: 1px;
+  }
+  #inventory .grid {
+    display: grid;
+    grid-template-columns: repeat(9, 48px);
+    grid-template-rows: repeat(4, 48px);
+    gap: 4px;
+  }
+  /* Divider + hotbar row embedded at the bottom of the inventory panel. The
+     row is bound to hotbarSlots, the same array the floating bar uses. */
+  .inv-divider {
+    height: 1px;
+    background: rgba(255,255,255,0.16);
+    margin: 0;
+  }
+  #inventory .grid.inv-hotbar {
+    grid-template-rows: 48px;
+    margin-top: 2px;
+  }
+  #inventory .grid.inv-hotbar .slot.active {
+    border-color: #fff;
+    box-shadow: 0 0 10px rgba(255,255,255,0.7);
+  }
+  /* Crafting area: 3x3 grid + arrow + output slot */
+  .crafting-area {
+    display: flex; justify-content: center;
+  }
+  .craft-wrap {
+    display: flex; align-items: center; gap: 12px;
+  }
+  .craft-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 48px);
+    grid-template-rows: repeat(3, 48px);
+    gap: 4px;
+  }
+  .craft-arrow {
+    color: #aaa; font-size: 24px; font-family: monospace;
+  }
+  .craft-output-slot {
+    width: 56px; height: 56px;
+    background: rgba(90,90,90,0.5);
+    border: 2px solid #888;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer;
+    position: relative;
+  }
+  .craft-output-slot:hover { border-color: #ccc; }
+  .craft-output-slot.has-output { border-color: #6bc36b; }
+  #inventory .slot {
+    width: 48px; height: 48px;
+    background: rgba(90,90,90,0.5);
+    border: 2px solid #666;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer;
+  }
+  #inventory .slot:hover { border-color: #ccc; }
+  #inventory .slot.dragging { opacity: 0.35; }
+  #hotbar .slot.dragging { opacity: 0.35; }
+  #inventory .slot .swatch {
+    width: 36px; height: 36px;
+    box-shadow: inset 0 0 0 1px rgba(0,0,0,0.4);
+  }
+  /* Item count badge — bottom-right of the slot, small white text with a
+     dark shadow so it stays readable on any swatch color. */
+  .slot .count-label {
+    position: absolute;
+    right: 2px; bottom: 0px;
+    font-family: "Courier New", monospace;
+    font-size: 12px; font-weight: bold;
+    color: #fff;
+    text-shadow: 1px 1px 0 #000, -1px 1px 0 #000, 1px -1px 0 #000, -1px -1px 0 #000;
+    pointer-events: none;
+    line-height: 1;
+  }
+  #inventory .hint {
+    color: #999; font-family: "Courier New", monospace;
+    font-size: 12px; text-align: center;
+  }
+
+  /* ---------- Furnace UI ---------- */
+  #furnace {
+    position: fixed; top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    display: none; flex-direction: column; gap: 12px;
+    padding: 18px;
+    background: rgba(18,18,18,0.94);
+    border: 3px solid #555; border-radius: 6px;
+    z-index: 30;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.6);
+  }
+  #furnace.open { display: flex; }
+  #furnace h2 {
+    color: #ddd; font-family: "Courier New", monospace;
+    font-size: 16px; text-align: center; letter-spacing: 1px;
+  }
+  .furnace-body { display: flex; align-items: center; gap: 16px; }
+  .furnace-col { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+  #furnace .slot {
+    width: 52px; height: 52px;
+    background: rgba(90,90,90,0.5);
+    border: 2px solid #666;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer; position: relative;
+  }
+  #furnace .slot:hover { border-color: #ccc; }
+  #furnace .slot .swatch {
+    width: 36px; height: 36px;
+    box-shadow: inset 0 0 0 1px rgba(0,0,0,0.4);
+  }
+  /* Fire progress (burns bottom -> top) */
+  .furnace-fire {
+    width: 22px; height: 30px;
+    background: rgba(60,60,60,0.7);
+    border: 2px solid #666;
+    position: relative; overflow: hidden;
+  }
+  #furnace-fire-fill {
+    position: absolute; left: 0; bottom: 0; width: 100%; height: 0%;
+    background: linear-gradient(#ffe27a, #ff6a00);
+  }
+  /* Cook progress (fills left -> right) */
+  .furnace-arrow {
+    width: 56px; height: 12px;
+    background: rgba(60,60,60,0.7);
+    border: 2px solid #666;
+    position: relative; overflow: hidden;
+  }
+  #furnace-arrow-fill {
+    position: absolute; left: 0; top: 0; height: 100%; width: 0%;
+    background: #e8e8e8;
+  }
+  #furnace .hint {
+    color: #999; font-family: "Courier New", monospace;
+    font-size: 12px; text-align: center;
+  }
+  #overlay {
+    position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+    background: rgba(0,0,0,0.55); z-index: 20; text-align: center; color: #fff;
+    font-family: "Courier New", monospace; pointer-events: auto;
+  }
+  .overlay-box { display: flex; flex-direction: column; gap: 14px; align-items: center; }
+  #overlay h1 { font-size: 24px; margin-bottom: 4px; text-shadow: 2px 2px 0 #000; }
+  #overlay p  { font-size: 14px; text-shadow: 1px 1px 0 #000; }
+  #overlay .hint { font-size: 11px; color: #bbb; line-height: 1.7; max-width: 520px; }
+  #overlay.hidden { display: none; }
+  .mode-buttons { display: flex; gap: 16px; margin-top: 6px; }
+  .mode-buttons button, #btn-respawn {
+    font-family: "Courier New", monospace; font-size: 16px;
+    padding: 12px 24px; cursor: pointer;
+    background: #4a4a4a; color: #fff;
+    border: 3px solid #888; border-radius: 4px;
+    box-shadow: inset 2px 2px 0 rgba(255,255,255,0.2), 2px 2px 0 #000;
+  }
+  .mode-buttons button:hover, #btn-respawn:hover { background: #5a5a5a; }
+  #btn-creative { border-color: #6bc36b; }
+  #btn-survival { border-color: #e06060; }
+
+  /* ---------- Death overlay ---------- */
+  #death-overlay {
+    position: fixed; inset: 0; display: none; align-items: center; justify-content: center;
+    background: rgba(80,0,0,0.7); z-index: 25; text-align: center; color: #fff;
+    font-family: "Courier New", monospace;
+  }
+  #death-overlay.show { display: flex; }
+  .death-box { display: flex; flex-direction: column; gap: 20px; align-items: center; }
+  .death-box h1 { font-size: 36px; color: #ff4040; text-shadow: 3px 3px 0 #000; }
+
+  /* ---------- Health bar (survival only) ---------- */
+  #health-bar {
+    position: fixed; bottom: 78px; left: 50%; transform: translateX(-50%);
+    display: none; gap: 2px; z-index: 10;
+  }
+  #health-bar.show { display: flex; }
+  .heart {
+    width: 16px; height: 16px;
+    background: #7a0000;
+    position: relative;
+  }
+  .heart.full { background: #e63946; }
+  .heart.full::after {
+    /* white shine to mimic MC heart */
+    content: ""; position: absolute;
+    top: 2px; left: 3px; width: 3px; height: 3px;
+    background: rgba(255,255,255,0.6);
+  }
+  /* simple pixel heart shape via clip on a 16x16 box */
+  .heart {
+    clip-path: polygon(
+      50% 100%, 0 40%, 0 20%, 20% 0, 40% 0, 50% 20%,
+      60% 0, 80% 0, 100% 20%, 100% 40%
+    );
+  }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<div id="hud">Minecraft Pre-Classic rd-132211 (HTML Remake)</div>
+<div id="time-indicator"><span id="time-icon">☀</span><span id="time-label">白天</span></div>
+<div id="sneak-indicator">潜行中</div>
+<div id="crosshair"></div>
+<div id="mining-ring"></div>
+<div id="item-name"></div>
+<div id="underwater"></div>
+<div id="damage-flash"></div>
+<div id="heal-toast"></div>
+<div id="health-bar"></div>
+<div id="hotbar"></div>
+<div id="hand-item"><div id="hand-swing"><div id="hand-icon"></div></div></div>
+<div id="inventory">
+  <h2>背包</h2>
+  <div class="crafting-area">
+    <div class="craft-wrap">
+      <div class="craft-grid" id="craft-grid"></div>
+      <div class="craft-arrow">→</div>
+      <div class="craft-output-slot" id="craft-output" data-container="craft-output" data-index="0"></div>
+    </div>
+  </div>
+  <div class="grid" id="inv-grid"></div>
+  <div class="inv-divider"></div>
+  <div class="grid inv-hotbar" id="inv-hotbar"></div>
+  <div class="hint">拖拽物品到合成网格 · 点击产物取出 · 滚轮切换快捷栏 · E 关闭</div>
+</div>
+<div id="furnace">
+  <h2>熔炉</h2>
+  <div class="furnace-body">
+    <div class="furnace-col">
+      <div class="slot" id="furnace-input" data-container="furnace-input" data-index="0"></div>
+      <div class="furnace-fire"><div id="furnace-fire-fill"></div></div>
+      <div class="slot" id="furnace-fuel" data-container="furnace-fuel" data-index="0"></div>
+    </div>
+    <div class="furnace-arrow"><div id="furnace-arrow-fill"></div></div>
+    <div class="slot" id="furnace-output" data-container="furnace-output" data-index="0"></div>
+  </div>
+  <div class="hint">上格放矿石 · 下格放燃料 · 点击产物取出 · E 关闭</div>
+</div>
+<div id="overlay">
+  <div class="overlay-box">
+    <h1>Minecraft Pre-Classic rd-132211</h1>
+    <p id="mode-label">选择游戏模式</p>
+    <div class="mode-buttons" id="mode-buttons">
+      <button id="btn-creative">创造模式</button>
+      <button id="btn-survival">生存模式</button>
+    </div>
+    <p id="resume-hint" style="display:none; font-size:18px; color:#fff; text-shadow:2px 2px 0 #000;">点击屏幕继续游戏</p>
+    <p class="hint">WASD 移动 · Space 跳跃 · Tab 疾跑 · Shift 潜行 · 鼠标视角 · LMB 挖掘(按住) · RMB 放置 · E 背包 · Esc 释放鼠标</p>
+  </div>
+</div>
+<div id="death-overlay">
+  <div class="death-box">
+    <h1>你死了！</h1>
+    <button id="btn-respawn">重新开始</button>
+  </div>
+</div>
+
+<script src="https://unpkg.com/three@0.128.0/build/three.min.js"></script>
+<script src="https://unpkg.com/three@0.128.0/examples/js/controls/PointerLockControls.js"></script>
+<script>
+(() => {
+  const SIZE = 64;
+  const AIR = 0, GRASS = 1, DIRT = 2, STONE = 3, WATER = 4, WOOD = 5, LEAVES = 6;
+  const PLANKS = 7, STICK = 8, WOODEN_PICKAXE = 9, STONE_PICKAXE = 10;
+  // Ore blocks, and the items they drop when harvested.
+  const COAL_ORE = 11, IRON_ORE = 12, GOLD_ORE = 13, DIAMOND_ORE = 14, REDSTONE_ORE = 15;
+  const COAL = 16, RAW_IRON = 17, RAW_GOLD = 18, DIAMOND = 19, REDSTONE = 20;
+  // Furnace (block) and its smelted products (items).
+  const FURNACE = 21, IRON_INGOT = 22, GOLD_INGOT = 23;
+  const IRON_PICKAXE = 24, GOLD_PICKAXE = 25;
+  const IRON_SWORD = 26, GOLD_SWORD = 27, STONE_SWORD = 28;
+  // Bed (block): right-click it to skip the night.
+  const BED = 29;
+  // Zombie Meat (food): eaten by right-clicking, +5 HP.
+  const ZOMBIE_MEAT = 30;
+
+  // Base break time (seconds) for each solid block type in survival mode.
+  const BREAK_TIME = {
+    [GRASS]:  0.5,
+    [DIRT]:   0.5,
+    [STONE]:  1.5,
+    [WOOD]:   1.0,
+    [LEAVES]: 0.3,
+    [PLANKS]: 1.0,
+    [COAL_ORE]:    1.5,
+    [IRON_ORE]:    1.5,
+    [GOLD_ORE]:    1.5,
+    [DIAMOND_ORE]: 2.0,
+    [REDSTONE_ORE]:1.5,
+    [FURNACE]:     1.5,
+    [BED]:         0.2,          // soft — beds are quick to pick up
+  };
+  // Block types that can be placed in the world. Sticks and tools (and ore
+  // drops) are items only and cannot be placed.
+  const PLACEABLE = new Set([
+    GRASS, DIRT, STONE, WATER, WOOD, LEAVES, PLANKS,
+    COAL_ORE, IRON_ORE, GOLD_ORE, DIAMOND_ORE, REDSTONE_ORE, FURNACE, BED,
+  ]);
+
+  // Which item each ore block leaves behind when broken.
+  const ORE_DROP = {
+    [COAL_ORE]: COAL,
+    [IRON_ORE]: RAW_IRON,
+    [GOLD_ORE]: RAW_GOLD,
+    [DIAMOND_ORE]: DIAMOND,
+    [REDSTONE_ORE]: REDSTONE,
+  };
+
+  // Pickaxe tiers (1 = wooden, 2 = stone, 3 = iron, 4 = gold). A block with a
+  // required tier can only be mined efficiently (and drop loot) with a
+  // pickaxe of that tier or better; otherwise mining is extremely slow and
+  // nothing drops.
+  const PICKAXE_TIER = {
+    [WOODEN_PICKAXE]: 1, [STONE_PICKAXE]: 2, [IRON_PICKAXE]: 3, [GOLD_PICKAXE]: 4,
+  };
+  const TOOL_SPEED_MULT = { 1: 1.5, 2: 2, 3: 2.5, 4: 3 };
+  const BLOCK_TIER_REQ = {
+    [STONE]:        1,  // stone & coal need a wooden pickaxe
+    [COAL_ORE]:     1,
+    [IRON_ORE]:     2,  // iron needs a stone pickaxe
+    [GOLD_ORE]:     2,
+    [DIAMOND_ORE]:  2,
+    [REDSTONE_ORE]: 2,
+    [FURNACE]:      1,
+  };
+  const BARE_SPEED_MULT = 0.1;   // "extremely slow" without the required tool
+
+  // Mining speed / drop yield for `blockType` when holding `heldType`.
+  function harvestInfo(blockType, heldType) {
+    const tier = PICKAXE_TIER[heldType] || 0;
+    const req = BLOCK_TIER_REQ[blockType] || 0;
+    if (req === 0) {
+      // No tool requirement — a pickaxe still speeds the block up.
+      return { speedMult: tier ? TOOL_SPEED_MULT[tier] : 1, drops: true };
+    }
+    if (tier >= req) return { speedMult: TOOL_SPEED_MULT[tier], drops: true };
+    return { speedMult: BARE_SPEED_MULT, drops: false };
+  }
+
+  // Ore generation: [block, chance per deep stone cell, max Y].
+  // Only deep stone is eligible, so ores never show on the grass surface.
+  const ORE_GEN = [
+    [COAL_ORE,     0.10, 4],
+    [IRON_ORE,     0.05, 4],
+    [GOLD_ORE,     0.03, 3],
+    [REDSTONE_ORE, 0.02, 3],
+    [DIAMOND_ORE,  0.01, 2],
+  ];
+
+  // ---------- Furnace settings ----------
+  // 1 unit of fuel burns for 10 seconds; smelting one item takes 10 seconds.
+  const FUEL_TIME = { [COAL]: 10, [WOOD]: 10 };
+  const SMELT_RECIPES = { [RAW_IRON]: IRON_INGOT, [RAW_GOLD]: GOLD_INGOT };
+  const COOK_TIME = 10;
+
+  // ---------- Food ----------
+  // HP restored per item. Eating is blocked at full health.
+  const FOOD_HEAL = { [ZOMBIE_MEAT]: 5 };
+
+  // ---------- Renderer / Scene / Camera ----------
+  const canvas = document.getElementById('game');
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: false });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.setSize(window.innerWidth, window.innerHeight);
+
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x78a7ff);
+  scene.fog = new THREE.Fog(0x78a7ff, 40, 130);
+
+  const camera = new THREE.PerspectiveCamera(
+    72, window.innerWidth / window.innerHeight, 0.05, 1000
+  );
+
+  // ---------- Lighting ----------
+  const hemi = new THREE.HemisphereLight(0x9fc4ff, 0x4a3a28, 0.7);
+  scene.add(hemi);
+  const dir = new THREE.DirectionalLight(0xffffff, 0.85);
+  dir.position.set(18, 30, 14);
+  scene.add(dir);
+  const fill = new THREE.DirectionalLight(0xffffff, 0.25);
+  fill.position.set(-10, 12, -8);
+  scene.add(fill);
+
+  // ---------- Day / night cycle ----------
+  // One full cycle = 1,440,000 ms (24 min): 12 min day, then 12 min night.
+  // `phase` runs 0..1; day is [0, 0.5) and night is [0.5, 1). Colour and
+  // light strength are interpolated between keyframes, never hard-switched.
+  const DAY_LENGTH = 1440000;
+  const NIGHT_START = 0.5;
+  let worldTime = DAY_LENGTH * 0.43;   // start just before sunset, so the
+                                       // dusk→dark transition shows up early
+  const SKY_KEYS = [
+    { t: 0.00, color: new THREE.Color(0xFF8C00), light: 0.35 },  // sunrise
+    { t: 0.06, color: new THREE.Color(0x87CEEB), light: 1.00 },  // full day
+    { t: 0.44, color: new THREE.Color(0x87CEEB), light: 1.00 },
+    { t: 0.50, color: new THREE.Color(0xFF8C00), light: 0.35 },  // sunset
+    { t: 0.56, color: new THREE.Color(0x050510), light: 0.06 },  // deep night
+    { t: 0.94, color: new THREE.Color(0x050510), light: 0.06 },
+    { t: 1.00, color: new THREE.Color(0xFF8C00), light: 0.35 },
+  ];
+  const skyColor = new THREE.Color();
+  const skyA = new THREE.Color();
+  const skyB = new THREE.Color();
+
+  function smoothstep(t) { return t * t * (3 - 2 * t); }
+
+  // Recolour sky + fog and rebalance the lights for the given cycle phase.
+  function updateSky(phase) {
+    let a = SKY_KEYS[SKY_KEYS.length - 1], b = SKY_KEYS[0];
+    for (let i = 0; i < SKY_KEYS.length - 1; i++) {
+      if (phase >= SKY_KEYS[i].t && phase <= SKY_KEYS[i + 1].t) {
+        a = SKY_KEYS[i]; b = SKY_KEYS[i + 1];
+        break;
+      }
+    }
+    const span = b.t - a.t;
+    const k = span > 0 ? smoothstep((phase - a.t) / span) : 0;
+    skyA.copy(a.color);
+    skyB.copy(b.color);
+    skyColor.copy(skyA).lerp(skyB, k);
+    const light = a.light + (b.light - a.light) * k;
+
+    scene.background.copy(skyColor);
+    scene.fog.color.copy(skyColor);
+    // Daytime intensities are unchanged from the original setup; at night a
+    // small floor keeps block edges faintly readable.
+    dir.intensity = 0.15 + 0.70 * light;
+    fill.intensity = 0.05 + 0.20 * light;
+    hemi.intensity = 0.10 + 0.60 * light;
+  }
+
+  // Top-right badge (☀ 白天 / ☾ 夜晚). Only touches the DOM when it flips.
+  let lastIsNight = null;
+  function renderTimeLabel(isNight) {
+    if (isNight === lastIsNight) return;
+    lastIsNight = isNight;
+    timeIconEl.textContent = isNight ? '\u263E' : '\u2600';
+    timeLabelEl.textContent = isNight ? '夜晚' : '白天';
+  }
+
+  // Bed: jump straight to bright daylight. No animation, no sleep screen —
+  // the sky recolours immediately. The horde is NOT deleted here: zombies that
+  // are exposed to the sun now burn, sheltered ones keep living (see
+  // tickZombies).
+  function skipToDay() {
+    worldTime = DAY_LENGTH * 0.25;      // noon: full daylight right away
+    updateSky(0.25);
+    renderTimeLabel(false);
+    // Keep the frame loop's own state in sync so it doesn't fire a second
+    // dawn transition on the next frame.
+    wasNight = false;
+    zombieSpawnTimer = 0;
+  }
+
+  // ---------- Procedural pixel textures ----------
+  function rngCanvas(drawFn) {
+    const c = document.createElement('canvas');
+    c.width = 16; c.height = 16;
+    const g = c.getContext('2d');
+    drawFn(g);
+    const tex = new THREE.CanvasTexture(c);
+    tex.magFilter = THREE.NearestFilter;
+    tex.minFilter = THREE.NearestFilter;
+    return tex;
+  }
+  function noiseFill(g, base, amp) {
+    for (let i = 0; i < 256; i++) {
+      const x = i % 16, y = (i / 16) | 0;
+      const v = (Math.random() * amp * 2 - amp) | 0;
+      g.fillStyle = 'rgb(' + (base[0]+v) + ',' + (base[1]+v) + ',' + (base[2]+v) + ')';
+      g.fillRect(x, y, 1, 1);
+    }
+  }
+  const dirtTex = rngCanvas(g => { g.fillStyle = '#8b5a2b'; g.fillRect(0,0,16,16); noiseFill(g, [139,90,43], 14); });
+  const stoneTex = rngCanvas(g => { g.fillStyle = '#8a8a8a'; g.fillRect(0,0,16,16); noiseFill(g, [138,138,138], 18); });
+  const grassTopTex = rngCanvas(g => {
+    g.fillStyle = '#5d9c3a'; g.fillRect(0,0,16,16);
+    for (let i = 0; i < 256; i++) {
+      const x = i % 16, y = (i / 16) | 0;
+      const v = (Math.random() * 30 - 15) | 0;
+      g.fillStyle = 'rgb(' + (93+v) + ',' + (156+v) + ',' + (58+v) + ')';
+      g.fillRect(x, y, 1, 1);
+    }
+  });
+  const grassSideTex = rngCanvas(g => {
+    g.fillStyle = '#8b5a2b'; g.fillRect(0,0,16,16);
+    noiseFill(g, [139,90,43], 14);
+    for (let y = 0; y < 4; y++)
+      for (let x = 0; x < 16; x++) {
+        const v = (Math.random() * 28 - 14) | 0;
+        g.fillStyle = 'rgb(' + (93+v) + ',' + (156+v) + ',' + (58+v) + ')';
+        g.fillRect(x, y, 1, 1);
+      }
+    for (let x = 0; x < 16; x++)
+      if (Math.random() < 0.4) {
+        const v = (Math.random() * 28 - 14) | 0;
+        g.fillStyle = 'rgb(' + (93+v) + ',' + (156+v) + ',' + (58+v) + ')';
+        g.fillRect(x, 4 + ((Math.random()*2)|0), 1, 1);
+      }
+  });
+  // Wood (log): brown bark with vertical grain stripes
+  const woodTex = rngCanvas(g => {
+    g.fillStyle = '#6b4a2a'; g.fillRect(0,0,16,16);
+    noiseFill(g, [107,74,42], 12);
+    // vertical bark streaks
+    for (let x = 0; x < 16; x += 3) {
+      const v = (Math.random() * 20 - 10) | 0;
+      g.fillStyle = 'rgb(' + (80+v) + ',' + (55+v) + ',' + (30+v) + ')';
+      for (let y = 0; y < 16; y++) if (Math.random() < 0.7) g.fillRect(x, y, 1, 1);
+    }
+  });
+  // Leaves: dark green pixel noise, slightly mottled
+  const leavesTex = rngCanvas(g => {
+    g.fillStyle = '#2e6b1f'; g.fillRect(0,0,16,16);
+    for (let i = 0; i < 256; i++) {
+      const x = i % 16, y = (i / 16) | 0;
+      const v = (Math.random() * 36 - 18) | 0;
+      g.fillStyle = 'rgb(' + (46+v) + ',' + (107+v) + ',' + (31+v) + ')';
+      g.fillRect(x, y, 1, 1);
+    }
+  });
+  // Planks: light tan wood with horizontal plank separators
+  const planksTex = rngCanvas(g => {
+    g.fillStyle = '#b88a4a'; g.fillRect(0,0,16,16);
+    noiseFill(g, [184,138,74], 14);
+    // horizontal plank lines every 4px
+    for (let y = 0; y < 16; y += 4) {
+      for (let x = 0; x < 16; x++) {
+        const v = (Math.random() * 16 - 8) | 0;
+        g.fillStyle = 'rgb(' + (110+v) + ',' + (80+v) + ',' + (45+v) + ')';
+        g.fillRect(x, y, 1, 1);
+      }
+    }
+  });
+
+  // Ore block face: dark gray stone mottled with noise, marked by a bold
+  // letter (or emoji for diamond) in the centre.
+  function oreTexture(glyph, color, fontPx) {
+    return rngCanvas(g => {
+      g.fillStyle = '#333333'; g.fillRect(0, 0, 16, 16);
+      noiseFill(g, [51, 51, 51], 12);
+      g.fillStyle = color;
+      g.font = 'bold ' + fontPx + 'px monospace';
+      g.textAlign = 'center';
+      g.textBaseline = 'middle';
+      g.fillText(glyph, 8, 8.5);
+    });
+  }
+  const coalOreTex     = oreTexture('C',  '#000000', 12);
+  const ironOreTex     = oreTexture('Fe', '#cfcfcf', 9);
+  const goldOreTex     = oreTexture('Au', '#ffd700', 9);
+  const redstoneOreTex = oreTexture('R',  '#e01010', 12);
+  const diamondOreTex  = rngCanvas(g => {
+    g.fillStyle = '#333333'; g.fillRect(0, 0, 16, 16);
+    noiseFill(g, [51, 51, 51], 12);
+    g.font = '11px sans-serif';
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    g.fillText('💎', 8, 8.5);
+  });
+  // Furnace: dark stone body with a lighter rim, a black opening and a
+  // glowing fire at the bottom of the mouth.
+  const furnaceTex = rngCanvas(g => {
+    g.fillStyle = '#5a5a5a'; g.fillRect(0, 0, 16, 16);
+    noiseFill(g, [90, 90, 90], 16);
+    g.fillStyle = '#3c3c3c'; g.fillRect(2, 2, 12, 12);   // recessed face
+    g.fillStyle = '#1a1a1a'; g.fillRect(4, 6, 8, 8);     // opening
+    g.fillStyle = '#ff9a2e'; g.fillRect(5, 9, 6, 4);     // fire glow
+    g.fillStyle = '#ffd24a'; g.fillRect(6, 10, 4, 2);
+  });
+
+  // Bed: red blanket on top, white mattress sides, dark wood base underneath —
+  // deliberately unlike planks so the two never get confused.
+  const bedTopTex = rngCanvas(g => {
+    g.fillStyle = '#e03030'; g.fillRect(0, 0, 16, 16);          // red blanket
+    for (let y = 5; y < 16; y += 4) {
+      g.fillStyle = '#b62020';
+      g.fillRect(0, y, 16, 1);                                   // fold lines
+    }
+    g.fillStyle = '#f4f4f4'; g.fillRect(2, 2, 12, 4);           // white pillow
+    g.fillStyle = '#cfcfcf'; g.fillRect(2, 5, 12, 1);           // pillow seam
+  });
+  const bedSideTex = rngCanvas(g => {
+    g.fillStyle = '#ededed'; g.fillRect(0, 0, 16, 16);          // white mattress
+    noiseFill(g, [237, 237, 237], 10);
+    g.fillStyle = '#c8c8c8'; g.fillRect(0, 6, 16, 1);           // mattress seam
+    g.fillStyle = '#4a2f18'; g.fillRect(0, 12, 16, 4);          // wooden frame
+  });
+  const bedBottomTex = rngCanvas(g => {
+    g.fillStyle = '#4a2f18'; g.fillRect(0, 0, 16, 16);          // wood base
+    noiseFill(g, [74, 47, 24], 10);
+  });
+
+  const grassTopMat = new THREE.MeshLambertMaterial({ map: grassTopTex, side: THREE.DoubleSide });
+  const grassSideMat = new THREE.MeshLambertMaterial({ map: grassSideTex, side: THREE.DoubleSide });
+  const dirtMat = new THREE.MeshLambertMaterial({ map: dirtTex, side: THREE.DoubleSide });
+  const stoneMat = new THREE.MeshLambertMaterial({ map: stoneTex, side: THREE.DoubleSide });
+  const woodMat = new THREE.MeshLambertMaterial({ map: woodTex, side: THREE.DoubleSide });
+  const leavesMat = new THREE.MeshLambertMaterial({ map: leavesTex, side: THREE.DoubleSide });
+  const planksMat = new THREE.MeshLambertMaterial({ map: planksTex, side: THREE.DoubleSide });
+  const coalOreMat     = new THREE.MeshLambertMaterial({ map: coalOreTex, side: THREE.DoubleSide });
+  const ironOreMat     = new THREE.MeshLambertMaterial({ map: ironOreTex, side: THREE.DoubleSide });
+  const goldOreMat     = new THREE.MeshLambertMaterial({ map: goldOreTex, side: THREE.DoubleSide });
+  const diamondOreMat  = new THREE.MeshLambertMaterial({ map: diamondOreTex, side: THREE.DoubleSide });
+  const redstoneOreMat = new THREE.MeshLambertMaterial({ map: redstoneOreTex, side: THREE.DoubleSide });
+  const furnaceMat     = new THREE.MeshLambertMaterial({ map: furnaceTex, side: THREE.DoubleSide });
+  const bedTopMat    = new THREE.MeshLambertMaterial({ map: bedTopTex, side: THREE.DoubleSide });
+  const bedSideMat   = new THREE.MeshLambertMaterial({ map: bedSideTex, side: THREE.DoubleSide });
+  const bedBottomMat = new THREE.MeshLambertMaterial({ map: bedBottomTex, side: THREE.DoubleSide });
+  const waterMat = new THREE.MeshLambertMaterial({
+    color: 0x3a7ad8, transparent: true, opacity: 0.5,
+    side: THREE.DoubleSide, depthWrite: false
+  });
+
+  // ---------- Simplex Noise (2D, self-contained) ----------
+  const Noise = (() => {
+    const grad3 = [[1,1,0],[-1,1,0],[1,-1,0],[-1,-1,0],
+                   [1,0,1],[-1,0,1],[1,0,-1],[-1,0,-1],
+                   [0,1,1],[0,-1,1],[0,1,-1],[0,-1,-1]];
+    const perm = new Uint8Array(512);
+    const permMod12 = new Uint8Array(512);
+    function seed(s) {
+      const p = new Uint8Array(256);
+      for (let i = 0; i < 256; i++) p[i] = i;
+      for (let i = 255; i > 0; i--) {
+        s = (s * 16807) % 2147483647;
+        const n = s % (i + 1);
+        const t = p[i]; p[i] = p[n]; p[n] = t;
+      }
+      for (let i = 0; i < 512; i++) { perm[i] = p[i & 255]; permMod12[i] = perm[i] % 12; }
+    }
+    function noise2D(xin, yin) {
+      const F2 = 0.5 * (Math.sqrt(3) - 1);
+      const G2 = (3 - Math.sqrt(3)) / 6;
+      let n0 = 0, n1 = 0, n2 = 0;
+      const s = (xin + yin) * F2;
+      const i = Math.floor(xin + s);
+      const j = Math.floor(yin + s);
+      const t = (i + j) * G2;
+      const X0 = i - t, Y0 = j - t;
+      const x0 = xin - X0, y0 = yin - Y0;
+      let i1, j1;
+      if (x0 > y0) { i1 = 1; j1 = 0; } else { i1 = 0; j1 = 1; }
+      const x1 = x0 - i1 + G2, y1 = y0 - j1 + G2;
+      const x2 = x0 - 1 + 2 * G2, y2 = y0 - 1 + 2 * G2;
+      const ii = i & 255, jj = j & 255;
+      const gi0 = permMod12[ii + perm[jj]];
+      const gi1 = permMod12[ii + i1 + perm[jj + j1]];
+      const gi2 = permMod12[ii + 1 + perm[jj + 1]];
+      let t0 = 0.5 - x0 * x0 - y0 * y0;
+      if (t0 >= 0) { t0 *= t0; const g = grad3[gi0]; n0 = t0 * t0 * (g[0] * x0 + g[1] * y0); }
+      let t1 = 0.5 - x1 * x1 - y1 * y1;
+      if (t1 >= 0) { t1 *= t1; const g = grad3[gi1]; n1 = t1 * t1 * (g[0] * x1 + g[1] * y1); }
+      let t2 = 0.5 - x2 * x2 - y2 * y2;
+      if (t2 >= 0) { t2 *= t2; const g = grad3[gi2]; n2 = t2 * t2 * (g[0] * x2 + g[1] * y2); }
+      return 70 * (n0 + n1 + n2);
+    }
+    function fbm(x, y, octaves) {
+      let total = 0, freq = 1, amp = 1, max = 0;
+      for (let o = 0; o < octaves; o++) {
+        total += noise2D(x * freq, y * freq) * amp;
+        max += amp;
+        amp *= 0.5;
+        freq *= 2;
+      }
+      return total / max;
+    }
+    return { seed, noise2D, fbm };
+  })();
+
+  // ---------- World data ----------
+  const blockMap = new Map();   // "x,y,z" -> type (terrain)
+  const waterSet = new Set();   // "x,y,z" (water, non-solid for collision)
+  const k = (x, y, z) => x + ',' + y + ',' + z;
+  // Furnace block states, keyed by block coordinate. Each furnace keeps its
+  // own input/fuel/output slots and burn/cook progress.
+  const furnaceStates = new Map();
+  function getFurnaceState(x, y, z) {
+    const key = k(x, y, z);
+    let st = furnaceStates.get(key);
+    if (!st) {
+      st = { input: null, fuel: null, output: null, burnTime: 0, burnTotal: 0, cook: 0, dirty: true };
+      furnaceStates.set(key, st);
+    }
+    return st;
+  }
+  function isSolid(x, y, z) {
+    if (y < 0) return true;        // hide bottom faces of the world floor
+    if (y >= SIZE) return false;
+    return blockMap.has(k(x, y, z));
+  }
+  function isWater(x, y, z) {
+    if (y < 0 || y >= SIZE) return false;
+    return waterSet.has(k(x, y, z));
+  }
+  // Opaque = terrain or water (used for face culling of both terrain & water)
+  function isOpaque(x, y, z) {
+    if (y < 0) return true;
+    if (y >= SIZE) return false;
+    return blockMap.has(k(x, y, z)) || waterSet.has(k(x, y, z));
+  }
+  const inBounds = (x, y, z) =>
+    x >= 0 && x < SIZE && y >= 0 && y < SIZE && z >= 0 && z < SIZE;
+
+  function setBlock(x, y, z, type) {
+    if (!inBounds(x, y, z)) return;
+    blockMap.set(k(x, y, z), type);
+  }
+  function removeBlock(x, y, z) {
+    blockMap.delete(k(x, y, z));
+  }
+
+  // ---------- Face definitions ----------
+  // Each face: dir (outward normal), 4 corner offsets (CCW from outside), material class
+  const FACES = [
+    { dir: [ 1, 0, 0], c: [[1,0,0],[1,0,1],[1,1,1],[1,1,0]] }, // +X
+    { dir: [-1, 0, 0], c: [[0,0,1],[0,0,0],[0,1,0],[0,1,1]] }, // -X
+    { dir: [ 0, 1, 0], c: [[0,1,1],[1,1,1],[1,1,0],[0,1,0]] }, // +Y top
+    { dir: [ 0,-1, 0], c: [[0,0,0],[1,0,0],[1,0,1],[0,0,1]] }, // -Y bottom
+    { dir: [ 0, 0, 1], c: [[1,0,1],[0,0,1],[0,1,1],[1,1,1]] }, // +Z
+    { dir: [ 0, 0,-1], c: [[0,0,0],[1,0,0],[1,1,0],[0,1,0]] }, // -Z
+  ];
+
+  // ---------- Merged geometry (face-culled) ----------
+  const worldGroup = new THREE.Group();
+  scene.add(worldGroup);
+
+  function makeMesh(material) {
+    const g = new THREE.BufferGeometry();
+    const m = new THREE.Mesh(g, material);
+    m.frustumCulled = false;
+    worldGroup.add(m);
+    return m;
+  }
+  const grassTopMesh = makeMesh(grassTopMat);
+  const grassSideMesh = makeMesh(grassSideMat);
+  const dirtMesh = makeMesh(dirtMat);
+  const stoneMesh = makeMesh(stoneMat);
+  const woodMesh = makeMesh(woodMat);
+  const leavesMesh = makeMesh(leavesMat);
+  const planksMesh = makeMesh(planksMat);
+  const coalOreMesh     = makeMesh(coalOreMat);
+  const ironOreMesh     = makeMesh(ironOreMat);
+  const goldOreMesh     = makeMesh(goldOreMat);
+  const diamondOreMesh  = makeMesh(diamondOreMat);
+  const redstoneOreMesh = makeMesh(redstoneOreMat);
+  const furnaceMesh     = makeMesh(furnaceMat);
+  const bedTopMesh    = makeMesh(bedTopMat);
+  const bedSideMesh   = makeMesh(bedSideMat);
+  const bedBottomMesh = makeMesh(bedBottomMat);
+  const waterMesh = makeMesh(waterMat);
+  waterMesh.renderOrder = 2;
+
+  function buildGeometry() {
+    const bufs = {
+      grassTop:  { pos: [], norm: [], uv: [], idx: [] },
+      grassSide: { pos: [], norm: [], uv: [], idx: [] },
+      dirt:      { pos: [], norm: [], uv: [], idx: [] },
+      stone:     { pos: [], norm: [], uv: [], idx: [] },
+      wood:      { pos: [], norm: [], uv: [], idx: [] },
+      leaves:    { pos: [], norm: [], uv: [], idx: [] },
+      planks:    { pos: [], norm: [], uv: [], idx: [] },
+      coalOre:     { pos: [], norm: [], uv: [], idx: [] },
+      ironOre:     { pos: [], norm: [], uv: [], idx: [] },
+      goldOre:     { pos: [], norm: [], uv: [], idx: [] },
+      diamondOre:  { pos: [], norm: [], uv: [], idx: [] },
+      redstoneOre: { pos: [], norm: [], uv: [], idx: [] },
+      furnace:     { pos: [], norm: [], uv: [], idx: [] },
+      bedTop:      { pos: [], norm: [], uv: [], idx: [] },
+      bedSide:     { pos: [], norm: [], uv: [], idx: [] },
+      bedBottom:   { pos: [], norm: [], uv: [], idx: [] },
+      water:     { pos: [], norm: [], uv: [], idx: [] },
+    };
+
+    function pushFace(buf, x, y, z, f) {
+      const base = buf.pos.length / 3;
+      for (const c of f.c) {
+        buf.pos.push(x + c[0], y + c[1], z + c[2]);
+        buf.norm.push(f.dir[0], f.dir[1], f.dir[2]);
+      }
+      buf.uv.push(0, 0, 1, 0, 1, 1, 0, 1);
+      buf.idx.push(base, base + 1, base + 2, base, base + 2, base + 3);
+    }
+
+    for (const [key, type] of blockMap) {
+      const parts = key.split(',');
+      const x = +parts[0], y = +parts[1], z = +parts[2];
+      for (const f of FACES) {
+        const nx = x + f.dir[0], ny = y + f.dir[1], nz = z + f.dir[2];
+        // Only cull terrain faces against SOLID neighbors. Water is
+        // transparent ("special air"), so faces touching water must stay
+        // rendered — otherwise the raycaster has nothing to hit underwater
+        // and blocks can't be placed/broken there.
+        if (isSolid(nx, ny, nz)) continue;
+
+        let target;
+        if (type === STONE) target = 'stone';
+        else if (type === WOOD) target = 'wood';
+        else if (type === LEAVES) target = 'leaves';
+        else if (type === PLANKS) target = 'planks';
+        else if (type === COAL_ORE) target = 'coalOre';
+        else if (type === IRON_ORE) target = 'ironOre';
+        else if (type === GOLD_ORE) target = 'goldOre';
+        else if (type === DIAMOND_ORE) target = 'diamondOre';
+        else if (type === REDSTONE_ORE) target = 'redstoneOre';
+        else if (type === FURNACE) target = 'furnace';
+        else if (type === BED) {
+          // Per-face materials: red blanket on top, mattress sides, wood base.
+          target = f.dir[1] === 1 ? 'bedTop' : (f.dir[1] === -1 ? 'bedBottom' : 'bedSide');
+        }
+        else if (f.dir[1] === 1) target = (type === GRASS) ? 'grassTop' : 'dirt';
+        else if (f.dir[1] === -1) target = 'dirt';
+        else target = (type === GRASS) ? 'grassSide' : 'dirt';
+        pushFace(bufs[target], x, y, z, f);
+      }
+    }
+
+    // Water faces: render only where exposed to air (neither terrain nor water)
+    for (const key of waterSet) {
+      const parts = key.split(',');
+      const x = +parts[0], y = +parts[1], z = +parts[2];
+      for (const f of FACES) {
+        const nx = x + f.dir[0], ny = y + f.dir[1], nz = z + f.dir[2];
+        if (isOpaque(nx, ny, nz)) continue;
+        pushFace(bufs.water, x, y, z, f);
+      }
+    }
+
+    const map = [
+      [grassTopMesh, bufs.grassTop],
+      [grassSideMesh, bufs.grassSide],
+      [dirtMesh, bufs.dirt],
+      [stoneMesh, bufs.stone],
+      [woodMesh, bufs.wood],
+      [leavesMesh, bufs.leaves],
+      [planksMesh, bufs.planks],
+      [coalOreMesh, bufs.coalOre],
+      [ironOreMesh, bufs.ironOre],
+      [goldOreMesh, bufs.goldOre],
+      [diamondOreMesh, bufs.diamondOre],
+      [redstoneOreMesh, bufs.redstoneOre],
+      [furnaceMesh, bufs.furnace],
+      [bedTopMesh, bufs.bedTop],
+      [bedSideMesh, bufs.bedSide],
+      [bedBottomMesh, bufs.bedBottom],
+      [waterMesh, bufs.water],
+    ];
+    for (const [mesh, buf] of map) {
+      const g = mesh.geometry;
+      g.setAttribute('position', new THREE.Float32BufferAttribute(buf.pos, 3));
+      g.setAttribute('normal', new THREE.Float32BufferAttribute(buf.norm, 3));
+      g.setAttribute('uv', new THREE.Float32BufferAttribute(buf.uv, 2));
+      g.setIndex(buf.idx);
+      g.computeBoundingSphere();
+    }
+  }
+
+  // ---------- Generate smooth terrain ----------
+  Noise.seed(1337);
+  const NOISE_SCALE = 0.05;    // low frequency -> broad, gentle hills
+  const BASE_HEIGHT = 3;
+  const AMPLITUDE = 7;         // modest amplitude
+  const OCTAVES = 4;
+  // Ground strata are 1.5x thicker than before: the whole terrain column
+  // (surface height) is scaled up while keeping the same landscape shape.
+  const LAYER_THICKNESS_SCALE = 1.5;
+
+  const raw = [];
+  for (let x = 0; x < SIZE; x++) {
+    raw[x] = [];
+    for (let z = 0; z < SIZE; z++) {
+      const n = Noise.fbm(x * NOISE_SCALE, z * NOISE_SCALE, OCTAVES); // ~[-1,1]
+      const t = (n + 1) * 0.5;
+      const smoothT = t * t * (3 - 2 * t); // smoothstep -> less jagged
+      raw[x][z] = (BASE_HEIGHT + smoothT * AMPLITUDE) * LAYER_THICKNESS_SCALE;
+    }
+  }
+
+  // 3x3 box smoothing (one pass) to soften slopes while keeping relief
+  function smoothPass(src) {
+    const dst = [];
+    for (let x = 0; x < SIZE; x++) {
+      dst[x] = [];
+      for (let z = 0; z < SIZE; z++) {
+        let sum = 0, cnt = 0;
+        for (let dx = -1; dx <= 1; dx++)
+          for (let dz = -1; dz <= 1; dz++) {
+            const nx = x + dx, nz = z + dz;
+            if (nx >= 0 && nx < SIZE && nz >= 0 && nz < SIZE) {
+              sum += src[nx][nz]; cnt++;
+            }
+          }
+        dst[x][z] = sum / cnt;
+      }
+    }
+    return dst;
+  }
+  const h = smoothPass(raw);
+
+  // Pass 1: build heightMap and collect all heights for sea-level calculation
+  const heightMap = [];
+  const allHeights = [];
+  for (let x = 0; x < SIZE; x++) {
+    heightMap[x] = [];
+    for (let z = 0; z < SIZE; z++) {
+      const v = Math.max(1, Math.min(SIZE - 2, Math.round(h[x][z])));
+      heightMap[x][z] = v;
+      allHeights.push(v);
+    }
+  }
+  allHeights.sort((a, b) => a - b);
+  const minH = allHeights[0];
+  // Sea level sits at the ~35th percentile of terrain height.
+  // This guarantees the lowest valleys/basins are filled with water,
+  // never producing a single floating water block.
+  const SEA_LEVEL = Math.max(
+    minH + 1,
+    allHeights[Math.floor(allHeights.length * 0.35)]
+  );
+
+  // Pass 2: fill terrain blocks + water columns in low areas
+  // Layer layout from surface down: grass (1) -> dirt (2) -> dirt (3) -> stone (4+)
+  for (let x = 0; x < SIZE; x++) {
+    for (let z = 0; z < SIZE; z++) {
+      const v = heightMap[x][z];
+      for (let y = 0; y <= v; y++) {
+        let type;
+        if (y === v) type = GRASS;            // surface: grass
+        else if (y >= v - 2) type = DIRT;     // 2 dirt layers below grass
+        else {
+          type = STONE;                       // 4th layer down and deeper
+          // Ore veins: only deep stone is eligible (stone already sits several
+          // blocks below the grass, so ores never appear on the surface).
+          for (const [ore, rate, maxY] of ORE_GEN) {
+            if (y <= maxY && Math.random() < rate) { type = ore; break; }
+          }
+        }
+        setBlock(x, y, z, type);
+      }
+      // Fill every cell from terrain top+1 up to sea level with water
+      if (v < SEA_LEVEL) {
+        for (let y = v + 1; y <= SEA_LEVEL; y++) waterSet.add(k(x, y, z));
+      }
+    }
+  }
+
+  // ---------- Trees ----------
+  // Place a tree on a grass surface block. Trunk = wood, canopy = leaves.
+  // Only spawns on land (surface >= sea level) and never overwrites existing
+  // solid blocks (so the trunk cell is preserved as wood).
+  function placeTree(tx, tz, baseY) {
+    const trunkH = 4 + ((Math.random() * 3) | 0); // 4..6
+    const top = baseY + trunkH;
+    // Trunk
+    for (let y = baseY + 1; y <= top; y++) setBlock(tx, y, tz, WOOD);
+    // Canopy layers (classic small oak shape)
+    const leafOffsets = [
+      // [dy, radius, cutCorners]
+      { dy: trunkH - 2, r: 2, cut: true  },  // bottom layer: 5x5 minus corners
+      { dy: trunkH - 1, r: 2, cut: true  },  // 5x5 minus corners
+      { dy: trunkH,     r: 1, cut: false },  // top layer: 3x3 full
+      { dy: trunkH + 1, r: 1, cut: true  },  // cap: 3x3 minus corners
+    ];
+    for (const lo of leafOffsets) {
+      const ly = baseY + lo.dy;
+      for (let dx = -lo.r; dx <= lo.r; dx++) {
+        for (let dz = -lo.r; dz <= lo.r; dz++) {
+          if (lo.cut && Math.abs(dx) === lo.r && Math.abs(dz) === lo.r) continue;
+          const lx = tx + dx, lz = tz + dz;
+          // don't overwrite the trunk or any existing solid block
+          if (!blockMap.has(k(lx, ly, lz))) setBlock(lx, ly, lz, LEAVES);
+        }
+      }
+    }
+  }
+  // ~1.2% of land columns get a tree; never underwater, keep 2-block margin
+  // from the map edge so canopies stay in bounds.
+  for (let x = 2; x < SIZE - 2; x++) {
+    for (let z = 2; z < SIZE - 2; z++) {
+      const v = heightMap[x][z];
+      if (v < SEA_LEVEL) continue;          // no trees in water
+      if (Math.random() < 0.012) placeTree(x, z, v);
+    }
+  }
+
+  buildGeometry();
+
+  // ---------- Water spread (fluid flow) ----------
+  const MAX_WATER = 4000;         // hard cap to avoid flooding the whole map
+  const MAX_SPREAD = 7;           // max horizontal distance (in blocks) from a water source
+  const spreadQueue = [];
+  const waterDist = new Map();    // key -> horizontal steps from its source block
+  let spreadTimer = 0;
+
+  function restartWaterSpread() {
+    spreadQueue.length = 0;
+    // Re-queue every existing water block so it can re-evaluate spreading
+    // after a block change. Existing distances are PRESERVED (a water block
+    // that already spread 7 steps won't magically get a fresh range). New
+    // water blocks (not yet in waterDist) are treated as sources (dist 0).
+    for (const key of waterSet) {
+      if (!waterDist.has(key)) waterDist.set(key, 0);
+      spreadQueue.push(key);
+    }
+  }
+  restartWaterSpread();
+
+  function tickWaterSpread(dt) {
+    spreadTimer += dt;
+    if (spreadTimer < 0.12) return;        // process a batch every ~120ms
+    spreadTimer = 0;
+
+    if (spreadQueue.length === 0 || waterSet.size >= MAX_WATER) return;
+
+    const dirs = [[1, 0, 0], [-1, 0, 0], [0, 0, 1], [0, 0, -1]];
+    const batch = 60;
+    let processed = 0;
+    let changed = false;
+
+    while (spreadQueue.length > 0 && processed < batch && waterSet.size < MAX_WATER) {
+      const key = spreadQueue.shift();
+      processed++;
+      if (!waterSet.has(key)) continue;    // cell no longer water
+      const dist = waterDist.get(key);
+      if (dist === undefined) continue;    // should not happen
+
+      const parts = key.split(',');
+      const x = +parts[0], y = +parts[1], z = +parts[2];
+
+      // Flow down first. Vertical fall preserves the horizontal distance
+      // from the source (water can fall indefinitely).
+      const dk = k(x, y - 1, z);
+      if (y - 1 >= 0 && !isOpaque(x, y - 1, z) && !waterSet.has(dk)) {
+        waterSet.add(dk);
+        waterDist.set(dk, dist);
+        spreadQueue.push(dk);
+        changed = true;
+        continue; // falling water takes priority
+      }
+
+      // Spread horizontally: each horizontal step costs +1 distance.
+      // Stop when already at MAX_SPREAD so water never spreads beyond 7
+      // blocks horizontally from its source.
+      if (dist >= MAX_SPREAD) continue;
+
+      for (const [dx, , dz] of dirs) {
+        const nx = x + dx, nz = z + dz;
+        if (!inBounds(nx, y, nz)) continue;
+        const nkey = k(nx, y, nz);
+        if (waterSet.has(nkey) || isOpaque(nx, y, nz)) continue;
+        // need support: solid or water directly below the target
+        if (!isOpaque(nx, y - 1, nz) && !waterSet.has(k(nx, y - 1, nz))) continue;
+        waterSet.add(nkey);
+        waterDist.set(nkey, dist + 1);
+        spreadQueue.push(nkey);
+        changed = true;
+        if (waterSet.size >= MAX_WATER) break;
+      }
+    }
+
+    if (changed) buildGeometry();
+    if (waterSet.size >= MAX_WATER) spreadQueue.length = 0;
+  }
+
+  // ---------- Target highlight ----------
+  const highlight = new THREE.LineSegments(
+    new THREE.EdgesGeometry(new THREE.BoxGeometry(1.004, 1.004, 1.004)),
+    new THREE.LineBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.6 })
+  );
+  highlight.visible = false;
+  scene.add(highlight);
+
+  // ---------- Mining progress (survival only) ----------
+  let isMiningPressed = false;     // LMB held down?
+  let miningTarget = null;         // "x,y,z" of the block currently being mined
+  let miningProgress = 0;          // 0..1 accumulation toward break
+
+  // ---------- Pointer lock controls ----------
+  const controls = new THREE.PointerLockControls(camera, renderer.domElement);
+  const overlay = document.getElementById('overlay');
+  const deathOverlay = document.getElementById('death-overlay');
+  const healthBarEl = document.getElementById('health-bar');
+  const underwaterEl = document.getElementById('underwater');
+  const damageFlashEl = document.getElementById('damage-flash');
+  const healToastEl = document.getElementById('heal-toast');
+  const sneakEl = document.getElementById('sneak-indicator');
+  const timeIconEl = document.getElementById('time-icon');
+  const timeLabelEl = document.getElementById('time-label');
+  let inventoryOpen = false;
+  // Furnace UI state: one furnace is open at a time. `openFurnaceState`
+  // points at the per-block furnace data currently bound to the UI.
+  let furnaceOpen = false;
+  let openFurnaceState = null;
+  let openFurnaceKey = null;
+
+  // ---------- Game mode ----------
+  let gameMode = null;            // 'creative' | 'survival' — null until chosen
+  let isDead = false;
+
+  const modeLabelEl = document.getElementById('mode-label');
+  const modeButtonsEl = document.getElementById('mode-buttons');
+  const resumeHintEl = document.getElementById('resume-hint');
+
+  // Switch the start overlay between "mode select" (first run) and
+  // "resume" (after a mode has already been chosen).
+  function setOverlayResumeMode(resume) {
+    if (resume) {
+      modeLabelEl.style.display = 'none';
+      modeButtonsEl.style.display = 'none';
+      resumeHintEl.style.display = 'block';
+    } else {
+      modeLabelEl.style.display = 'block';
+      modeButtonsEl.style.display = 'flex';
+      resumeHintEl.style.display = 'none';
+    }
+  }
+
+  function startGame(mode) {
+    gameMode = mode;
+    isDead = false;
+    // Set up inventory contents based on the mode (creative = infinite items,
+    // survival = empty, items obtained by breaking blocks).
+    initInventory(mode);
+    // Reset all furnace state and close any open furnace UI on (re)start.
+    furnaceStates.clear();
+    furnaceOpen = false;
+    openFurnaceState = null;
+    openFurnaceKey = null;
+    furnaceEl.classList.remove('open');
+    // Drop any item still floating on the cursor from a previous UI session.
+    if (dragItem) { dragItem = null; }
+    updateGhost();
+    if (mode === 'survival') {
+      health = MAX_HEALTH;
+      healthBarEl.classList.add('show');
+      renderHealth();
+    } else {
+      healthBarEl.classList.remove('show');
+    }
+    // After the first mode selection, subsequent Esc/unlock overlays should
+    // only offer "click to resume", not the mode picker.
+    setOverlayResumeMode(true);
+    overlay.classList.add('hidden');
+    deathOverlay.classList.remove('show');
+    resetPlayer();
+    // A fresh session starts with no zombies; the night spawner takes over.
+    clearZombies();
+    clearDrops();
+    controls.lock();
+  }
+  document.getElementById('btn-creative').addEventListener('click', () => startGame('creative'));
+  document.getElementById('btn-survival').addEventListener('click', () => startGame('survival'));
+  document.getElementById('btn-respawn').addEventListener('click', () => {
+    startGame(gameMode || 'survival');
+  });
+
+  // Clicking the overlay while in resume mode re-locks the pointer (resumes).
+  // Mode buttons handle their own clicks, so ignore clicks that originate
+  // from a button inside the overlay.
+  overlay.addEventListener('click', (e) => {
+    if (e.target.closest('button')) return;
+    if (gameMode && !isDead) controls.lock();
+  });
+
+  controls.addEventListener('lock', () => {
+    overlay.classList.add('hidden');
+    deathOverlay.classList.remove('show');
+  });
+  controls.addEventListener('unlock', () => {
+    // Show the overlay again only when not opening the inventory/furnace and
+    // the player is still alive.
+    if (!inventoryOpen && !furnaceOpen && !isDead) overlay.classList.remove('hidden');
+  });
+
+  // ---------- Player physics ----------
+  const PLAYER_HALF_W = 0.3;
+  const PLAYER_HEIGHT = 1.8;
+  const EYE_HEIGHT = 1.62;
+  const MOVE_SPEED = 4.8;
+  const GRAVITY = 24;
+  const JUMP_SPEED = 8.4;
+  const SNEAK_EYE_DROP = 0.4;      // camera lowers by this many units while sneaking
+  const SNEAK_SPEED_MULT = 0.3;    // movement speed multiplier while sneaking
+  const FLY_SPEED = 7.0;            // creative flight vertical speed
+  const FLY_HORIZ_MULT = 1.4;       // creative flight horizontal speed multiplier
+  const SPRINT_SPEED_MULT = 1.8;    // sprint speed multiplier (walking + flying)
+  const BASE_FOV = 72;              // normal field of view
+  const SPRINT_FOV = 82;            // FOV while sprinting (speed感)
+  const FOV_LERP_SPEED = 8;         // FOV smoothing rate
+
+  const spawnX = 32, spawnZ = 32;
+  const spawnY = heightMap[spawnX][spawnZ] + 1;
+  const feet = new THREE.Vector3(spawnX + 0.5, spawnY, spawnZ + 0.5);
+  const velocity = new THREE.Vector3();
+  let onGround = false;
+
+  // ---------- Player body model (third-person avatar) ----------
+  // A simple box that mirrors the physics position. It is hidden in first
+  // person so the camera (which sits inside it) never sees its own geometry.
+  const PLAYER_BODY_W = 0.5, PLAYER_BODY_H = 1.8, PLAYER_BODY_D = 0.5;
+  const playerMesh = new THREE.Mesh(
+    new THREE.BoxGeometry(PLAYER_BODY_W, PLAYER_BODY_H, PLAYER_BODY_D),
+    new THREE.MeshLambertMaterial({ color: 0x27408B })
+  );
+  playerMesh.position.set(feet.x, feet.y + PLAYER_BODY_H / 2, feet.z);
+  playerMesh.visible = false;              // first person by default
+  scene.add(playerMesh);
+
+  // ---------- Camera view mode (FPS / TPS) ----------
+  let thirdPerson = false;
+  const TPS_DISTANCE = 4.5;                // blocks behind the player
+  const TPS_LIFT = 1.1;                    // extra height above the eyes
+
+  function setThirdPerson(on) {
+    thirdPerson = on;
+    playerMesh.visible = on;               // never visible from the inside
+    renderHandItem();                      // hide the 2D hand overlay in TPS
+  }
+
+  // ---------- Flight (creative only) ----------
+  let flying = false;
+  let lastSpaceTime = 0;            // for double-tap Space to toggle flight
+
+  // ---------- Health / damage (survival only) ----------
+  const MAX_HEALTH = 20;            // 10 hearts × 2 HP each
+  let health = MAX_HEALTH;
+  let airborneMaxY = 0;             // highest Y reached while not on ground
+  let wasAirborne = false;          // were we airborne last frame? (for landing detect)
+  let underwaterTime = 0;           // seconds continuously underwater
+  let drownDamageTimer = 0;         // accumulator for 1 HP/sec drowning damage
+
+  function resetPlayer() {
+    feet.set(spawnX + 0.5, spawnY, spawnZ + 0.5);
+    velocity.set(0, 0, 0);
+    onGround = false;
+    flying = false;
+    airborneMaxY = spawnY;
+    wasAirborne = false;
+    underwaterTime = 0;
+    drownDamageTimer = 0;
+    health = MAX_HEALTH;
+    camera.fov = BASE_FOV;
+    camera.updateProjectionMatrix();
+    isMiningPressed = false;
+    miningTarget = null;
+    miningProgress = 0;
+    if (gameMode === 'survival') renderHealth();
+  }
+
+  function damagePlayer(amount) {
+    if (gameMode !== 'survival' || isDead) return;
+    health = Math.max(0, health - amount);
+    renderHealth();
+    flashDamage();
+    if (health <= 0) {
+      isDead = true;
+      controls.unlock();
+      deathOverlay.classList.add('show');
+    }
+  }
+
+  function renderHealth() {
+    healthBarEl.innerHTML = '';
+    const fullHearts = Math.ceil(health / 2);   // each heart = 2 HP
+    for (let i = 0; i < 10; i++) {
+      const h = document.createElement('div');
+      h.className = 'heart' + (i < fullHearts ? ' full' : '');
+      healthBarEl.appendChild(h);
+    }
+  }
+
+  // Red vignette pulse when the player takes damage.
+  function flashDamage() {
+    damageFlashEl.classList.remove('flash');
+    void damageFlashEl.offsetWidth;    // restart the animation
+    damageFlashEl.classList.add('flash');
+  }
+
+  // Green "+5" pop above the crosshair when food heals the player.
+  function flashHeal(amount) {
+    healToastEl.textContent = '+' + amount;
+    healToastEl.classList.remove('show');
+    void healToastEl.offsetWidth;      // restart the animation
+    healToastEl.classList.add('show');
+  }
+
+  // Right-click with food in hand: eat one item if it would actually heal.
+  // Returns true when the click was consumed, so the caller never places a
+  // block or opens a furnace.
+  function tryEat() {
+    const s = hotbarSlots[hotbarIndex];
+    if (!s || s.count <= 0) return false;
+    const heal = FOOD_HEAL[s.type];
+    if (heal == null) return false;                 // not food
+    if (health >= MAX_HEALTH) return false;         // full HP: never waste food
+
+    if (s.count !== Infinity) {
+      s.count -= 1;
+      if (s.count <= 0) hotbarSlots[hotbarIndex] = null;
+    }
+    if (gameMode === 'survival') {
+      health = Math.min(MAX_HEALTH, health + heal);
+      renderHealth();
+    }
+    renderHotbar();
+    renderInventory();
+    flashHeal(heal);
+    return true;
+  }
+
+  // ---------- Zombies ----------
+  const ZOMBIE_SPEED = 3.2;               // slower than the player (4.8)
+  const ZOMBIE_CHASE_RANGE = 16;          // starts chasing inside this radius
+  const ZOMBIE_DESPAWN_RANGE = 32;        // removed beyond this radius
+  const ZOMBIE_ATTACK_RANGE = 1.5;        // 3D centre-to-centre distance
+  const ZOMBIE_ATTACK_COOLDOWN = 1000;    // ms between bites
+  const ZOMBIE_MAX_HP = 20;
+  const zombies = [];                     // live zombies
+  const zombieMeshes = [];                // raycast targets
+  const eyeMat = new THREE.MeshBasicMaterial({ color: 0x050505 });
+
+  // ---------- Player melee ----------
+  // Fist damage is 1; holding a sword overrides it. `playerDamage` is
+  // recomputed every time the selected hotbar slot changes (renderHotbar).
+  const BASE_PLAYER_DAMAGE = 1;
+  const ATTACK_COOLDOWN = 500;            // ms between two melee hits
+  const WEAPON_DAMAGE = {
+    [STONE_SWORD]: 5,
+    [IRON_SWORD]: 6,
+    [GOLD_SWORD]: 5,
+  };
+  let playerDamage = BASE_PLAYER_DAMAGE;
+  let lastAttackTime = -Infinity;
+
+  function updatePlayerDamage() {
+    const s = hotbarSlots[hotbarIndex];
+    playerDamage = (s && s.count > 0 && WEAPON_DAMAGE[s.type]) || BASE_PLAYER_DAMAGE;
+  }
+
+  // Same box body as the player avatar, dark zombie green, plus two black
+  // eye cubes on the front (+Z) face near the top.
+  function createZombieMesh() {
+    const group = new THREE.Group();
+    group.add(new THREE.Mesh(
+      new THREE.BoxGeometry(PLAYER_BODY_W, PLAYER_BODY_H, PLAYER_BODY_D),
+      new THREE.MeshLambertMaterial({ color: 0x2E8B57 })
+    ));
+    for (const sx of [-1, 1]) {
+      const eye = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.12, 0.06), eyeMat);
+      eye.position.set(sx * 0.13, 0.62, PLAYER_BODY_W / 2);
+      group.add(eye);
+    }
+    return group;
+  }
+
+  // Top surface (feet height) of the highest solid block in the column at
+  // (x,z), scanning downwards from `fromY`. -1 means "void" (nothing solid).
+  function groundSurfaceAt(x, z, fromY) {
+    const bx = Math.floor(x), bz = Math.floor(z);
+    for (let y = Math.floor(fromY); y >= 0; y--) {
+      if (isSolid(bx, y, bz)) return y + 1;
+    }
+    return -1;
+  }
+
+  function addZombie(x, y, z) {
+    const mesh = createZombieMesh();
+    mesh.position.set(x, y + PLAYER_BODY_H / 2, z);
+    const zb = {
+      mesh, x, y, z, hp: ZOMBIE_MAX_HP, lastAttack: -Infinity,
+      // Sunlight damage state: exposure is cached and refreshed twice a second.
+      sunExposed: false, sunCheckAt: 0,
+    };
+    // Tag every part (incl. the eye cubes) so a raycast hit maps back here.
+    mesh.traverse(o => { o.userData.zombie = zb; });
+    scene.add(mesh);
+    zombies.push(zb);
+    zombieMeshes.push(mesh);
+  }
+
+  function removeZombie(index) {
+    const zb = zombies[index];
+    if (!zb) return;
+    scene.remove(zb.mesh);
+    const mi = zombieMeshes.indexOf(zb.mesh);
+    if (mi >= 0) zombieMeshes.splice(mi, 1);
+    zombies.splice(index, 1);
+  }
+
+  function spawnZombies(count) {
+    for (let i = 0; i < count; i++) {
+      // Hard cap: never exceed the global limit, whatever called us.
+      if (zombies.length >= MAX_ZOMBIES) return;
+      for (let tries = 0; tries < 40; tries++) {
+        const ang = Math.random() * Math.PI * 2;
+        const r = 8 + Math.random() * 7;           // 8..15 blocks away, never in your face
+        const x = feet.x + Math.cos(ang) * r;
+        const z = feet.z + Math.sin(ang) * r;
+        const bx = Math.floor(x), bz = Math.floor(z);
+        if (bx < 1 || bx >= SIZE - 1 || bz < 1 || bz >= SIZE - 1) continue;
+        // Use the TRUE top of the column so we never spawn inside a hill.
+        const surface = groundSurfaceAt(x, z, SIZE - 1);
+        if (surface < 0) continue;                       // void column
+        if (surface < feet.y - 3 || surface > feet.y + 4) continue;  // wrong elevation
+        if (isWater(bx, surface, bz)) continue;           // not on open water
+        addZombie(x, surface, z);
+        break;
+      }
+    }
+  }
+
+  // Spawn pacing: at most one zombie per 5 s, and never more than the global
+  // cap. Slots free up instantly when a zombie is killed or cleared at dawn,
+  // because removeZombie() splices it out of `zombies` right away.
+  const ZOMBIE_SPAWN_INTERVAL = 5000;    // ms == 1 spawn attempt per 5 s
+  const MAX_ZOMBIES = 10;                // global live-zombie cap
+  let zombieSpawnTimer = 0;
+  let wasNight = false;
+
+  function clearZombies() {
+    for (let i = zombies.length - 1; i >= 0; i--) removeZombie(i);
+    zombieSpawnTimer = 0;
+  }
+
+  // Body collision for a zombie (0.5 x 1.8 x 0.5 box, feet at y).
+  function zombieBlockedAt(x, y, z) {
+    const hw = PLAYER_BODY_W / 2 - 0.01;
+    const minX = Math.floor(x - hw), maxX = Math.floor(x + hw);
+    const minZ = Math.floor(z - hw), maxZ = Math.floor(z + hw);
+    const minY = Math.floor(y), maxY = Math.floor(y + PLAYER_BODY_H - 0.01);
+    for (let yy = minY; yy <= maxY; yy++)
+      for (let xx = minX; xx <= maxX; xx++)
+        for (let zz = minZ; zz <= maxZ; zz++)
+          if (isSolid(xx, yy, zz)) return true;
+    return false;
+  }
+
+  // Move one zombie by (dx,dz) with axis-separated collision resolution and a
+  // 1-block step-up, then stick it to the surface underneath.
+  function moveZombie(zb, dx, dz) {
+    let nx = zb.x, nz = zb.z;
+    if (!zombieBlockedAt(zb.x + dx, zb.y, zb.z)) nx = zb.x + dx;
+    if (!zombieBlockedAt(nx, zb.y, zb.z + dz)) nz = zb.z + dz;
+    // Blocked head-on: allow climbing a single block.
+    if (nx === zb.x && nz === zb.z &&
+        !zombieBlockedAt(zb.x + dx, zb.y + 1, zb.z + dz)) {
+      nx = zb.x + dx;
+      nz = zb.z + dz;
+      zb.y += 1;
+    }
+    zb.x = nx;
+    zb.z = nz;
+    // Snap to the ground so it walks down ledges instead of floating.
+    const surface = groundSurfaceAt(zb.x, zb.z, zb.y + 0.6);
+    if (surface >= 0) zb.y = surface;
+  }
+
+  // True when nothing solid sits between the zombie's head and the top of the
+  // world. Scans one vertical column, so it is cheap (and it is cached per
+  // zombie below instead of running every frame).
+  function inSunlight(x, y, z) {
+    const cx = Math.floor(x), cz = Math.floor(z);
+    for (let yy = Math.floor(y + PLAYER_BODY_H); yy < SIZE; yy++) {
+      if (isSolid(cx, yy, cz)) return false;
+    }
+    return true;
+  }
+
+  // Turn the body towards the player, chase, bite, and burn in the sun.
+  function tickZombies(dt) {
+    const now = performance.now();
+    const daylight = worldTime / DAY_LENGTH < NIGHT_START;
+    for (let i = zombies.length - 1; i >= 0; i--) {
+      const zb = zombies[i];
+      const dx = feet.x - zb.x, dz = feet.z - zb.z;
+      const dist = Math.hypot(dx, dz);
+
+      if (dist > ZOMBIE_DESPAWN_RANGE) { removeZombie(i); continue; }
+
+      // Daylight burning: only zombies with an open sky above them take
+      // damage — tree shade and caves are safe. The column scan is cached for
+      // 0.5s per zombie so a full horde never causes per-frame map traversals.
+      if (daylight) {
+        if (now >= zb.sunCheckAt) {
+          zb.sunExposed = inSunlight(zb.x, zb.y, zb.z);
+          zb.sunCheckAt = now + 500;
+        }
+        if (zb.sunExposed) {
+          zb.hp -= dt * 3;
+          if (zb.hp <= 0) {
+            spawnDrop(ZOMBIE_MEAT, zb.x, zb.y + 0.9, zb.z, 1);
+            removeZombie(i);
+            continue;
+          }
+        }
+      }
+
+      // Face the player — always, even when standing still.
+      zb.mesh.position.set(zb.x, zb.y + PLAYER_BODY_H / 2, zb.z);
+      zb.mesh.lookAt(feet.x, zb.y + PLAYER_BODY_H / 2, feet.z);
+
+      if (dist <= ZOMBIE_CHASE_RANGE && dist > 1e-3) {
+        const move = Math.min(ZOMBIE_SPEED * dt, Math.max(0, dist - 0.9));
+        moveZombie(zb, (dx / dist) * move, (dz / dist) * move);
+      }
+
+      // Bite when close enough (3D distance between body centres).
+      const d3 = Math.hypot(
+        feet.x - zb.x,
+        (feet.y + PLAYER_BODY_H / 2) - (zb.y + PLAYER_BODY_H / 2),
+        feet.z - zb.z
+      );
+      if (d3 < ZOMBIE_ATTACK_RANGE && now - zb.lastAttack >= ZOMBIE_ATTACK_COOLDOWN) {
+        zb.lastAttack = now;
+        damagePlayer(2);           // 1 heart
+      }
+    }
+  }
+
+  // First zombie under the crosshair within reach, or null.
+  function pickZombie() {
+    if (!zombieMeshes.length) return null;
+    camera.getWorldDirection(camDir);
+    raycaster.set(headPos, camDir);
+    const hits = raycaster.intersectObjects(zombieMeshes, true);
+    return hits.length ? (hits[0].object.userData.zombie || null) : null;
+  }
+
+  function damageZombie(zb, amount) {
+    zb.hp -= amount;
+    if (zb.hp <= 0) {
+      // Loot: one piece of zombie meat where it died.
+      spawnDrop(ZOMBIE_MEAT, zb.x, zb.y + 0.9, zb.z, 1);
+      const idx = zombies.indexOf(zb);
+      if (idx >= 0) removeZombie(idx);
+      return;
+    }
+    // Brief red tint as hit feedback.
+    const body = zb.mesh.children[0];
+    body.material.emissive.setHex(0x8B1A1A);
+    setTimeout(() => { if (zb.mesh.parent) body.material.emissive.setHex(0x000000); }, 150);
+  }
+
+  // ---------- Item drops ----------
+  // Breaking a block no longer stuffs the item straight into the inventory:
+  // a small spinning cube pops out, is magnetised towards the player and only
+  // enters the inventory once it is really close.
+  const DROP_SIZE = 0.25;              // a quarter of a block
+  const DROP_GRAVITY = 16;
+  const DROP_MAGNET_RANGE = 1.5;       // attraction kicks in here
+  const DROP_COLLECT_RANGE = 0.5;      // swallowed here
+  const DROP_MAGNET_SPEED = 14;        // fast "snap" towards the player
+  const DROP_LIFETIME = 300000;        // 5 minutes, then despawn
+  const DROP_GRAB_DELAY = 400;         // keep the initial pop visible
+  const DROP_THROW_DELAY = 1500;       // Q-thrown items can't be re-collected
+  const DROP_MERGE_RANGE = 2.0;        // identical drops merge within this
+  const DROP_BOB = 0.06;               // floating amplitude while resting
+  const drops = [];
+
+  // Blocks render their real face texture; items (coal, ingots, sticks, tools)
+  // get a small canvas square carrying their glyph.
+  const BLOCK_DROP_MATS = {
+    [GRASS]: grassSideMat, [DIRT]: dirtMat, [STONE]: stoneMat,
+    [WOOD]: woodMat, [LEAVES]: leavesMat, [PLANKS]: planksMat,
+    [COAL_ORE]: coalOreMat, [IRON_ORE]: ironOreMat, [GOLD_ORE]: goldOreMat,
+    [DIAMOND_ORE]: diamondOreMat, [REDSTONE_ORE]: redstoneOreMat,
+    [FURNACE]: furnaceMat,
+    [BED]: bedTopMat,
+  };
+  const itemDropMatCache = new Map();
+
+  function itemDropMaterial(type) {
+    if (BLOCK_DROP_MATS[type]) return BLOCK_DROP_MATS[type];
+    if (itemDropMatCache.has(type)) return itemDropMatCache.get(type);
+    const item = ITEM_BY_ID[type];
+    const c = document.createElement('canvas');
+    c.width = 32; c.height = 32;
+    const g = c.getContext('2d');
+    g.fillStyle = '#2a2a2a'; g.fillRect(0, 0, 32, 32);
+    g.strokeStyle = '#5a5a5a'; g.lineWidth = 2; g.strokeRect(1, 1, 30, 30);
+    if (item && item.icon) {
+      g.save();
+      g.translate(16, 16);
+      g.rotate(((item.icon.rotate || 0) * Math.PI) / 180);
+      g.fillStyle = item.icon.color;
+      g.font = 'bold ' + (item.icon.glyph.length > 1 ? 15 : 20) + 'px monospace';
+      g.textAlign = 'center';
+      g.textBaseline = 'middle';
+      g.fillText(item.icon.glyph, 0, 1);
+      g.restore();
+    } else if (item) {
+      g.fillStyle = item.color;
+      g.fillRect(4, 4, 24, 24);
+    }
+    const tex = new THREE.CanvasTexture(c);
+    tex.magFilter = THREE.NearestFilter;
+    const mat = new THREE.MeshLambertMaterial({ map: tex });
+    itemDropMatCache.set(type, mat);
+    return mat;
+  }
+
+  // Little "x3" badge floating above a merged drop.
+  function updateDropLabel(d) {
+    if (d.label) {
+      d.cube.remove(d.label);
+      d.label.material.map.dispose();
+      d.label.material.dispose();
+      d.label = null;
+    }
+    if (d.count <= 1) return;
+    const c = document.createElement('canvas');
+    c.width = 64; c.height = 32;
+    const g = c.getContext('2d');
+    g.font = 'bold 22px monospace';
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    g.fillStyle = 'rgba(0,0,0,0.65)';
+    g.fillRect(2, 6, 60, 22);
+    g.fillStyle = '#fff';
+    g.fillText('x' + d.count, 32, 18);
+    const sp = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: new THREE.CanvasTexture(c), transparent: true, depthTest: false,
+    }));
+    sp.scale.set(0.42, 0.21, 1);
+    sp.position.set(0, 0.24, 0);
+    d.cube.add(sp);
+    d.label = sp;
+  }
+
+  function spawnDrop(type, x, y, z, count = 1, opts = {}) {
+    // Stack onto a nearby identical drop instead of adding a second model.
+    // Thrown items (Q) skip merging: they need their own pickup delay.
+    if (opts.delay == null) {
+      for (const d of drops) {
+        if (d.type !== type) continue;
+        const dx = d.group.position.x - x;
+        const dy = d.group.position.y - y;
+        const dz = d.group.position.z - z;
+        if (dx * dx + dy * dy + dz * dz <= DROP_MERGE_RANGE * DROP_MERGE_RANGE) {
+          d.count += count;
+          updateDropLabel(d);
+          return;
+        }
+      }
+    }
+
+    const cube = new THREE.Mesh(
+      new THREE.BoxGeometry(DROP_SIZE, DROP_SIZE, DROP_SIZE),
+      itemDropMaterial(type)
+    );
+    const group = new THREE.Group();
+    group.add(cube);
+    group.position.set(
+      x + (Math.random() - 0.5) * 0.3,
+      y,
+      z + (Math.random() - 0.5) * 0.3
+    );
+    scene.add(group);
+
+    const d = {
+      group, cube, label: null,
+      type, count,
+      vx: opts.vx != null ? opts.vx : (Math.random() - 0.5) * 1.6,
+      vy: opts.vy != null ? opts.vy : 3.5 + Math.random() * 1.5,
+      vz: opts.vz != null ? opts.vz : (Math.random() - 0.5) * 1.6,
+      born: performance.now(),
+      // Thrown items use a longer delay so the player can't suck them back
+      // the instant they press Q.
+      pickupDelay: opts.delay != null ? opts.delay : DROP_GRAB_DELAY,
+      spin: Math.random() * Math.PI * 2,
+      phase: Math.random() * Math.PI * 2,
+      settled: false,
+    };
+    drops.push(d);
+    updateDropLabel(d);
+  }
+
+  function removeDrop(index) {
+    const d = drops[index];
+    if (!d) return;
+    if (d.label) {
+      d.label.material.map.dispose();
+      d.label.material.dispose();
+    }
+    d.cube.geometry.dispose();
+    scene.remove(d.group);
+    drops.splice(index, 1);
+  }
+
+  function clearDrops() {
+    while (drops.length) removeDrop(drops.length - 1);
+  }
+
+  // Per-frame: magnet + collect + gravity/bounce + spin/bob + 5 min cleanup.
+  function tickDrops(dt, now) {
+    const px = feet.x, py = feet.y + 0.9, pz = feet.z;
+    const half = DROP_SIZE / 2;
+    for (let i = drops.length - 1; i >= 0; i--) {
+      const d = drops[i];
+      const p = d.group.position;
+
+      if (now - d.born > DROP_LIFETIME) { removeDrop(i); continue; }
+
+      const dx = px - p.x, dy = py - p.y, dz = pz - p.z;
+      const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+
+      if (now - d.born >= d.pickupDelay && dist < DROP_COLLECT_RANGE) {
+        // Close enough: destroy the model and hand the stack to the player.
+        addItem(d.type, d.count);
+        renderHotbar();
+        renderInventory();
+        removeDrop(i);
+        continue;
+      }
+
+      if (now - d.born >= d.pickupDelay && dist < DROP_MAGNET_RANGE) {
+        // Magnet: fly straight at the player, ignoring gravity.
+        const step = Math.min(dist, DROP_MAGNET_SPEED * dt) / (dist || 1);
+        p.x += dx * step;
+        p.y += dy * step;
+        p.z += dz * step;
+        d.settled = false;
+      } else {
+        // Free fall, then a little bounce on landing.
+        d.vy -= DROP_GRAVITY * dt;
+        p.x += d.vx * dt;
+        p.y += d.vy * dt;
+        p.z += d.vz * dt;
+        d.vx *= 0.9;
+        d.vz *= 0.9;
+
+        if (isSolid(Math.floor(p.x), Math.floor(p.y - half), Math.floor(p.z))) {
+          const floorY = Math.floor(p.y - half) + 1;
+          p.y = floorY + half;
+          if (d.vy < -1.2) d.vy = -d.vy * 0.35;          // bounce
+          else { d.vy = 0; d.settled = true; }
+        } else {
+          d.settled = false;                              // ground vanished
+        }
+      }
+
+      // Slow rotation + gentle up/down float to draw the eye.
+      d.spin += dt * 1.6;
+      d.phase += dt * 2.2;
+      d.cube.rotation.y = d.spin;
+      d.cube.position.y = d.settled ? Math.sin(d.phase) * DROP_BOB : 0;
+    }
+  }
+
+  // Q: throw one item from the selected hotbar slot along the view direction.
+  function dropSelectedItem() {
+    const s = hotbarSlots[hotbarIndex];
+    if (!s || s.count <= 0 || !ITEM_BY_ID[s.type]) return;
+
+    // Creative items are infinite, so the slot is left untouched there.
+    if (gameMode === 'survival' && s.count !== Infinity) {
+      s.count -= 1;
+      if (s.count <= 0) hotbarSlots[hotbarIndex] = null;
+    }
+    renderHotbar();
+    renderInventory();
+
+    // 1.5 blocks ahead of the eye, thrown forward with a slight upward arc.
+    camera.getWorldDirection(camDir);
+    const sx = feet.x + camDir.x * 1.5;
+    const sy = feet.y + EYE_HEIGHT + camDir.y * 1.5;
+    const sz = feet.z + camDir.z * 1.5;
+    spawnDrop(s.type, sx, sy, sz, 1, {
+      vx: camDir.x * 5.0,
+      vy: camDir.y * 5.0 + 1.6,
+      vz: camDir.z * 5.0,
+      delay: DROP_THROW_DELAY,
+    });
+    swingHand();
+  }
+
+  function collides(fx, fy, fz) {
+    const minX = Math.floor(fx - PLAYER_HALF_W);
+    const maxX = Math.floor(fx + PLAYER_HALF_W);
+    const minY = Math.floor(fy);
+    const maxY = Math.floor(fy + PLAYER_HEIGHT);
+    const minZ = Math.floor(fz - PLAYER_HALF_W);
+    const maxZ = Math.floor(fz + PLAYER_HALF_W);
+    for (let y = minY; y <= maxY; y++)
+      for (let x = minX; x <= maxX; x++)
+        for (let z = minZ; z <= maxZ; z++)
+          if (isSolid(x, y, z)) return true;
+    return false;
+  }
+
+  // Edge-protection for sneaking: returns true if any cell under the player's
+  // footprint at (px, pz) is a solid block (i.e. the player would still be
+  // supported). The support layer is the block directly below the feet.
+  function hasSupport(px, pz) {
+    const supportY = Math.floor(feet.y) - 1;
+    const minX = Math.floor(px - PLAYER_HALF_W);
+    const maxX = Math.floor(px + PLAYER_HALF_W);
+    const minZ = Math.floor(pz - PLAYER_HALF_W);
+    const maxZ = Math.floor(pz + PLAYER_HALF_W);
+    for (let x = minX; x <= maxX; x++)
+      for (let z = minZ; z <= maxZ; z++)
+        if (isSolid(x, supportY, z) || isSolid(x, supportY + 1, z)) return true;
+    return false;
+  }
+
+  // True if the water is touching the player's feet: the whole footprint is
+  // tested at the feet level and one block below, so landing half on the shore
+  // still counts as a splashdown.
+  function feetInWater() {
+    const fy = Math.floor(feet.y);
+    const minX = Math.floor(feet.x - PLAYER_HALF_W);
+    const maxX = Math.floor(feet.x + PLAYER_HALF_W);
+    const minZ = Math.floor(feet.z - PLAYER_HALF_W);
+    const maxZ = Math.floor(feet.z + PLAYER_HALF_W);
+    for (let x = minX; x <= maxX; x++)
+      for (let z = minZ; z <= maxZ; z++)
+        if (isWater(x, fy, z) || isWater(x, fy - 1, z)) return true;
+    return false;
+  }
+
+  const keys = {};
+  window.addEventListener('keydown', e => {
+    keys[e.code] = true;
+    // F5 toggles between first and third person. Swallow the browser reload.
+    if (e.code === 'F5' || e.key === 'F5') {
+      e.preventDefault();
+      setThirdPerson(!thirdPerson);
+      return;
+    }
+    // Tab is the sprint key; stop it from moving focus away from the game.
+    if (e.code === 'Tab' && controls.isLocked) e.preventDefault();
+    if (e.code === 'KeyE') {
+      // E closes the furnace if it is open, otherwise toggles the inventory.
+      if (furnaceOpen) closeFurnace();
+      else toggleInventory();
+    }
+    // Esc also closes the furnace UI (the pointer is already unlocked there).
+    if (e.code === 'Escape' && furnaceOpen) closeFurnace();
+    // Number keys 1-9 directly select the corresponding hotbar slot.
+    if (e.code.startsWith('Digit')) {
+      const n = parseInt(e.code.slice(5), 10);
+      if (n >= 1 && n <= HOTBAR_SIZE) {
+        hotbarIndex = n - 1;
+        renderHotbar();
+        showItemName();
+      }
+    }
+    // Q throws a single item out of the selected slot (never while a UI is up).
+    if (e.code === 'KeyQ' || e.key === 'q' || e.key === 'Q') {
+      if (controls.isLocked && !inventoryOpen && !furnaceOpen && !isDead) {
+        e.preventDefault();
+        dropSelectedItem();
+      }
+      return;
+    }
+    // Creative flight: double-tap Space toggles flying (only in creative).
+    if (e.code === 'Space' && gameMode === 'creative' && !inventoryOpen) {
+      const t = performance.now();
+      if (t - lastSpaceTime < 300) {
+        flying = !flying;
+        velocity.y = 0;
+      }
+      lastSpaceTime = t;
+    }
+  });
+  window.addEventListener('keyup',   e => { keys[e.code] = false; });
+  window.addEventListener('blur', () => { for (const k in keys) keys[k] = false; });
+
+  // ---------- Inventory & Hotbar ----------
+  // Available item types. color = representative swatch color.
+  const ITEMS = [
+    { id: GRASS,  name: '草方块', color: '#5d9c3a' },
+    { id: DIRT,   name: '泥土',   color: '#8b5a2b' },
+    { id: STONE,  name: '石头',   color: '#8a8a8a' },
+    { id: WATER,  name: '水',     color: '#3a7ad8' },
+    { id: WOOD,   name: '木头',   color: '#6b4a2a' },
+    { id: LEAVES, name: '树叶',   color: '#2e6b1f' },
+    { id: PLANKS, name: '木板',   color: '#b88a4a' },
+    { id: STICK,  name: '木棍',   color: '#a0784a', icon: { glyph: 'I', color: '#8b5a2b', rotate: 0 } },
+    { id: WOODEN_PICKAXE, name: '木镐', color: '#8b6b3a', icon: { glyph: 'T', color: '#8b5a2b', rotate: 45 } },
+    { id: STONE_PICKAXE,  name: '石镐', color: '#9a9a9a', icon: { glyph: 'T', color: '#555555', rotate: 45 } },
+    // Ore blocks: dark gray background with a bold marking.
+    { id: COAL_ORE,     name: '煤矿石',   color: '#333333', icon: { glyph: 'C',  color: '#000000', bg: '#333333', size: 20 } },
+    { id: IRON_ORE,     name: '铁矿石',   color: '#333333', icon: { glyph: 'Fe', color: '#cfcfcf', bg: '#333333', size: 14 } },
+    { id: GOLD_ORE,     name: '金矿石',   color: '#333333', icon: { glyph: 'Au', color: '#ffd700', bg: '#333333', size: 14 } },
+    { id: DIAMOND_ORE,  name: '钻石矿石', color: '#333333', icon: { glyph: '💎', bg: '#333333', size: 20 } },
+    { id: REDSTONE_ORE, name: '红石矿石', color: '#333333', icon: { glyph: 'R',  color: '#e01010', bg: '#333333', size: 20 } },
+    // Ore drops (items only).
+    { id: COAL,     name: '煤炭', color: '#1a1a1a', icon: { glyph: 'C',  color: '#000000', size: 24 } },
+    { id: RAW_IRON, name: '粗铁', color: '#d9a08e', icon: { glyph: 'Fe', color: '#d9a08e', size: 15 } },
+    { id: RAW_GOLD, name: '粗金', color: '#ffd700', icon: { glyph: 'Au', color: '#ffd700', size: 15 } },
+    { id: DIAMOND,  name: '钻石', color: '#7be4ff', icon: { glyph: '💎', size: 22 } },
+    { id: REDSTONE, name: '红石', color: '#e01010', icon: { glyph: 'R',  color: '#e01010', size: 24 } },
+    // Furnace block + smelted ingots.
+    { id: FURNACE,    name: '熔炉', color: '#555555', icon: { glyph: '🔥', bg: '#333333', size: 18 } },
+    { id: IRON_INGOT, name: '铁锭', color: '#D3D3D3', icon: { glyph: 'Ing', color: '#D3D3D3', size: 13 } },
+    { id: GOLD_INGOT, name: '金锭', color: '#FFD700', icon: { glyph: 'Ing', color: '#FFD700', size: 13 } },
+    { id: IRON_PICKAXE, name: '铁镐', color: '#D3D3D3', icon: { glyph: 'T', color: '#D3D3D3', rotate: 45 } },
+    { id: GOLD_PICKAXE, name: '金镐', color: '#FFD700', icon: { glyph: 'T', color: '#FFD700', rotate: 45 } },
+    { id: STONE_SWORD, name: '石剑', color: '#5A5A5A', icon: { glyph: '\u2020', color: '#5A5A5A', rotate: 180 } },
+    { id: IRON_SWORD, name: '铁剑', color: '#D3D3D3', icon: { glyph: '\u2020', color: '#D3D3D3', rotate: 180 } },
+    { id: GOLD_SWORD, name: '金剑', color: '#FFD700', icon: { glyph: '\u2020', color: '#FFD700', rotate: 180 } },
+    { id: BED, name: '床', color: '#a62b2b', icon: { glyph: '\uD83D\uDECF\uFE0F', color: '#ffffff', size: 22 } },
+    { id: ZOMBIE_MEAT, name: '僵尸肉', color: '#E74C3C', icon: { glyph: 'D', color: '#E74C3C' } },
+  ];
+  const ITEM_BY_ID = {};
+  for (const it of ITEMS) ITEM_BY_ID[it.id] = it;
+
+  const HOTBAR_SIZE = 9;
+  const INV_SIZE = 36;             // 9x4 grid (was 27; swords needed the extra row)
+  const CRAFT_SIZE = 9;            // 3x3 crafting grid
+  const MAX_STACK = 64;             // max items per stack
+
+  // Slots hold either null (empty) or { type: <block id>, count: <number> }.
+  // In creative mode count is Infinity (items never run out).
+  let hotbarSlots = new Array(HOTBAR_SIZE).fill(null);
+  let invSlots = new Array(INV_SIZE).fill(null);
+  let craftingSlots = new Array(CRAFT_SIZE).fill(null);
+  let craftingOutput = null;        // null | { type, count }
+  let hotbarIndex = 0;
+
+  // ---------- Crafting recipes ----------
+  // Each recipe is a 3x3 pattern (0 = empty). Matching crops both the
+  // player's grid and the recipe to their non-empty bounding box, so a recipe
+  // placed anywhere in the 3x3 grid still matches.
+  const RECIPES = [
+    // 1 Wood -> 4 Planks
+    { pattern: [[WOOD,0,0],[0,0,0],[0,0,0]], output: { type: PLANKS, count: 4 } },
+    // 2 Planks (vertical) -> 4 Sticks
+    { pattern: [[PLANKS,0,0],[PLANKS,0,0],[0,0,0]], output: { type: STICK, count: 4 } },
+    // 3 Planks (top row) + 2 Sticks (middle column, rows 2 & 3) -> Wooden Pickaxe
+    { pattern: [[PLANKS,PLANKS,PLANKS],[0,STICK,0],[0,STICK,0]], output: { type: WOODEN_PICKAXE, count: 1 } },
+    // 3 Stone (top row) + 2 Sticks (middle column, rows 2 & 3) -> Stone Pickaxe
+    { pattern: [[STONE,STONE,STONE],[0,STICK,0],[0,STICK,0]], output: { type: STONE_PICKAXE, count: 1 } },
+    // 8 Stone ring (centre empty) -> Furnace
+    { pattern: [[STONE,STONE,STONE],[STONE,0,STONE],[STONE,STONE,STONE]], output: { type: FURNACE, count: 1 } },
+    // 3 Iron Ingots (top row) + 2 Sticks (middle column, rows 2 & 3) -> Iron Pickaxe
+    { pattern: [[IRON_INGOT,IRON_INGOT,IRON_INGOT],[0,STICK,0],[0,STICK,0]], output: { type: IRON_PICKAXE, count: 1 } },
+    // 3 Gold Ingots (top row) + 2 Sticks (middle column, rows 2 & 3) -> Gold Pickaxe
+    { pattern: [[GOLD_INGOT,GOLD_INGOT,GOLD_INGOT],[0,STICK,0],[0,STICK,0]], output: { type: GOLD_PICKAXE, count: 1 } },
+    // Swords are ONE vertical column (blade on top, stick at the bottom) —
+    // deliberately distinct from the 3-wide pickaxe "T".
+    // 2 Stone stacked over 1 Stick -> Stone Sword
+    { pattern: [[0,STONE,0],[0,STONE,0],[0,STICK,0]], output: { type: STONE_SWORD, count: 1 } },
+    // 2 Iron Ingots stacked over 1 Stick -> Iron Sword
+    { pattern: [[0,IRON_INGOT,0],[0,IRON_INGOT,0],[0,STICK,0]], output: { type: IRON_SWORD, count: 1 } },
+    // 2 Gold Ingots stacked over 1 Stick -> Gold Sword
+    { pattern: [[0,GOLD_INGOT,0],[0,GOLD_INGOT,0],[0,STICK,0]], output: { type: GOLD_SWORD, count: 1 } },
+    // 3 Leaves over 3 Planks (bottom row empty) -> Bed
+    { pattern: [[LEAVES,LEAVES,LEAVES],[PLANKS,PLANKS,PLANKS],[0,0,0]], output: { type: BED, count: 1 } },
+  ];
+
+  // Crop a 3x3 pattern (array of 3 rows, each 3 cells) to its non-empty
+  // bounding box. Returns null if the pattern is entirely empty.
+  function cropPattern(pattern) {
+    let minR = 3, maxR = -1, minC = 3, maxC = -1;
+    for (let r = 0; r < 3; r++) {
+      for (let c = 0; c < 3; c++) {
+        if (pattern[r][c] !== 0) {
+          if (r < minR) minR = r;
+          if (r > maxR) maxR = r;
+          if (c < minC) minC = c;
+          if (c > maxC) maxC = c;
+        }
+      }
+    }
+    if (maxR < 0) return null;
+    const out = [];
+    for (let r = minR; r <= maxR; r++) {
+      const row = [];
+      for (let c = minC; c <= maxC; c++) row.push(pattern[r][c]);
+      out.push(row);
+    }
+    return out;
+  }
+
+  // Check the current 3x3 crafting grid against all recipes. Returns the
+  // matching recipe's output, or null if no recipe matches.
+  function matchRecipe() {
+    // Build the player's 3x3 pattern from craftingSlots.
+    const grid = [];
+    for (let r = 0; r < 3; r++) {
+      const row = [];
+      for (let c = 0; c < 3; c++) {
+        const s = craftingSlots[r * 3 + c];
+        row.push(s ? s.type : 0);
+      }
+      grid.push(row);
+    }
+    const playerCrop = cropPattern(grid);
+    if (!playerCrop) return null;
+
+    for (const recipe of RECIPES) {
+      const recipeCrop = cropPattern(recipe.pattern);
+      if (!recipeCrop) continue;
+      if (playerCrop.length !== recipeCrop.length) continue;
+      if (playerCrop[0].length !== recipeCrop[0].length) continue;
+      let match = true;
+      for (let r = 0; r < playerCrop.length && match; r++) {
+        for (let c = 0; c < playerCrop[0].length; c++) {
+          if (playerCrop[r][c] !== recipeCrop[r][c]) { match = false; break; }
+        }
+      }
+      if (match) return recipe.output;
+    }
+    return null;
+  }
+
+  // (Re)initialize inventory contents based on the selected game mode.
+  function initInventory(mode) {
+    hotbarSlots = new Array(HOTBAR_SIZE).fill(null);
+    invSlots = new Array(INV_SIZE).fill(null);
+    craftingSlots = new Array(CRAFT_SIZE).fill(null);
+    craftingOutput = null;
+    if (mode === 'creative') {
+      // Creative: all item types available infinitely. The first 9 fill the
+      // hotbar; all types also go into the main inventory (36 slots).
+      const types = [
+        GRASS, DIRT, STONE, WATER, WOOD, LEAVES, PLANKS, STICK, WOODEN_PICKAXE, STONE_PICKAXE,
+        COAL_ORE, IRON_ORE, GOLD_ORE, DIAMOND_ORE, REDSTONE_ORE,
+        COAL, RAW_IRON, RAW_GOLD, DIAMOND, REDSTONE,
+        FURNACE, IRON_INGOT, GOLD_INGOT, IRON_PICKAXE, GOLD_PICKAXE,
+        STONE_SWORD, IRON_SWORD, GOLD_SWORD,
+        BED, ZOMBIE_MEAT,
+      ];
+      for (let i = 0; i < types.length; i++) {
+        if (i < HOTBAR_SIZE) hotbarSlots[i] = { type: types[i], count: Infinity };
+        if (i < INV_SIZE) invSlots[i] = { type: types[i], count: Infinity };
+      }
+    }
+    // Survival: everything starts empty — items come from breaking blocks
+    // and crafting.
+    renderHotbar();
+    renderInventory();
+  }
+
+  const hotbarEl = document.getElementById('hotbar');
+  const invGridEl = document.getElementById('inv-grid');
+  const invHotbarEl = document.getElementById('inv-hotbar');
+  const craftGridEl = document.getElementById('craft-grid');
+  const craftOutputEl = document.getElementById('craft-output');
+  const inventoryEl = document.getElementById('inventory');
+  const itemNameEl = document.getElementById('item-name');
+  const furnaceEl = document.getElementById('furnace');
+  const furnaceInputEl = document.getElementById('furnace-input');
+  const furnaceFuelEl = document.getElementById('furnace-fuel');
+  const furnaceOutputEl = document.getElementById('furnace-output');
+  const furnaceFireFill = document.getElementById('furnace-fire-fill');
+  const furnaceArrowFill = document.getElementById('furnace-arrow-fill');
+
+  function getSlot(container, index) {
+    if (container === 'hotbar') return hotbarSlots[index];
+    if (container === 'craft') return craftingSlots[index];
+    if (container === 'furnace-input') return openFurnaceState ? openFurnaceState.input : null;
+    if (container === 'furnace-fuel') return openFurnaceState ? openFurnaceState.fuel : null;
+    if (container === 'furnace-output') return openFurnaceState ? openFurnaceState.output : null;
+    return invSlots[index];
+  }
+  function setSlot(container, index, item) {
+    if (container === 'hotbar') hotbarSlots[index] = item;
+    else if (container === 'craft') craftingSlots[index] = item;
+    else if (container === 'furnace-input') { if (openFurnaceState) { openFurnaceState.input = item; openFurnaceState.dirty = true; } }
+    else if (container === 'furnace-fuel') { if (openFurnaceState) { openFurnaceState.fuel = item; openFurnaceState.dirty = true; } }
+    else if (container === 'furnace-output') { if (openFurnaceState) { openFurnaceState.output = item; openFurnaceState.dirty = true; } }
+    else invSlots[index] = item;
+  }
+  // Convenience: true when a slot holds a usable item.
+  function slotHasItem(container, index) {
+    const s = getSlot(container, index);
+    return !!s && s.count > 0;
+  }
+
+  // Add `count` items of `type` to the inventory (hotbar first, then main
+  // inventory). Stacks with existing slots of the same type (up to MAX_STACK),
+  // otherwise fills the first empty slot. Returns true if all items were
+  // added, false if the inventory was full and some were dropped.
+  // In creative mode this is a no-op (items are infinite).
+  function addItem(type, count) {
+    if (gameMode === 'creative') return true;
+    let remaining = count;
+
+    // Pass 1: stack into existing slots of the same type.
+    for (const container of ['hotbar', 'inv']) {
+      const slots = container === 'hotbar' ? hotbarSlots : invSlots;
+      for (let i = 0; i < slots.length && remaining > 0; i++) {
+        const s = slots[i];
+        if (s && s.type === type && s.count < MAX_STACK) {
+          const space = MAX_STACK - s.count;
+          const add = Math.min(space, remaining);
+          s.count += add;
+          remaining -= add;
+        }
+      }
+    }
+
+    // Pass 2: fill empty slots.
+    for (const container of ['hotbar', 'inv']) {
+      const slots = container === 'hotbar' ? hotbarSlots : invSlots;
+      for (let i = 0; i < slots.length && remaining > 0; i++) {
+        if (slots[i] == null) {
+          const add = Math.min(MAX_STACK, remaining);
+          slots[i] = { type, count: add };
+          remaining -= add;
+        }
+      }
+    }
+
+    return remaining === 0;
+  }
+
+  function swatch(color) {
+    const d = document.createElement('div');
+    d.className = 'swatch';
+    d.style.background = color;
+    return d;
+  }
+  // Build the visual icon for an item. Items with an `icon` render a bold
+  // monospace glyph (tools "T"/"I", ore markings "C"/"Fe"/💎); ore blocks
+  // additionally get a dark `bg` square behind the glyph. Everything else is
+  // a plain colored swatch.
+  function makeItemIcon(item) {
+    if (item && item.icon) {
+      const size = item.icon.size || 24;
+      let host;
+      if (item.icon.bg) {
+        // Block-style icon: dark square (sized like a swatch) with the glyph
+        // centred inside.
+        host = document.createElement('div');
+        host.className = 'block-icon';
+        host.style.width = '34px';
+        host.style.height = '34px';
+        host.style.background = item.icon.bg;
+        host.style.display = 'flex';
+        host.style.alignItems = 'center';
+        host.style.justifyContent = 'center';
+        host.style.boxShadow = 'inset 0 0 0 1px rgba(0,0,0,0.5)';
+      }
+      const span = document.createElement('span');
+      span.className = 'item-glyph';
+      span.textContent = item.icon.glyph;
+      span.style.color = item.icon.color;
+      span.style.fontFamily = 'monospace';
+      span.style.fontWeight = 'bold';
+      span.style.fontSize = size + 'px';
+      span.style.lineHeight = '1';
+      span.style.display = 'inline-block';
+      const rot = item.icon.rotate != null ? item.icon.rotate : 0;
+      span.style.transform = 'rotate(' + rot + 'deg)';
+      span.style.userSelect = 'none';
+      if (host) { host.appendChild(span); return host; }
+      return span;
+    }
+    return swatch(item.color);
+  }
+  // Small count label shown at the bottom-right of an item swatch.
+  function countLabel(count) {
+    const d = document.createElement('span');
+    d.className = 'count-label';
+    d.textContent = count;
+    return d;
+  }
+
+  // Build one slot element. Shared by the floating hotbar, the inventory grid
+  // and the hotbar row embedded in the inventory panel, so all three look and
+  // behave identically (same drag handlers, count badges, tooltips).
+  function makeSlotEl(container, index, stack, active) {
+    const slot = document.createElement('div');
+    slot.className = 'slot' + (active ? ' active' : '');
+    slot.dataset.container = container;
+    slot.dataset.index = index;
+    if (stack && stack.count > 0 && ITEM_BY_ID[stack.type]) {
+      slot.appendChild(makeItemIcon(ITEM_BY_ID[stack.type]));
+      // Show the count number only in survival mode and only when > 1.
+      if (gameMode === 'survival' && stack.count > 1) {
+        slot.appendChild(countLabel(stack.count));
+      }
+      slot.title = ITEM_BY_ID[stack.type].name;
+    }
+    // Every slot (empty or not) needs the drag/place handler so that a held
+    // item can be dropped into an empty slot.
+    attachDrag(slot, container, index);
+    return slot;
+  }
+
+  // The 9-slot row inside the inventory panel. It is bound to hotbarSlots —
+  // the very same array the floating bar renders — so dragging items in or out
+  // of it is reflected on the real hotbar the moment the panel closes.
+  function renderInvHotbarRow() {
+    invHotbarEl.innerHTML = '';
+    for (let i = 0; i < HOTBAR_SIZE; i++) {
+      invHotbarEl.appendChild(makeSlotEl('hotbar', i, hotbarSlots[i], i === hotbarIndex));
+    }
+  }
+
+  function renderHotbar() {
+    hotbarEl.innerHTML = '';
+    for (let i = 0; i < HOTBAR_SIZE; i++) {
+      hotbarEl.appendChild(makeSlotEl('hotbar', i, hotbarSlots[i], i === hotbarIndex));
+    }
+    renderHandItem();
+    updatePlayerDamage();   // weapon bonus follows the selected slot
+    // Keep the embedded row in sync when the panel happens to be open.
+    if (inventoryOpen) renderInvHotbarRow();
+  }
+
+  // ---------- First-person held item view ----------
+  // A big item icon anchored at the bottom-right of the screen, mirroring
+  // whatever the currently selected hotbar slot holds.
+  const handItemEl = document.getElementById('hand-item');
+  const handSwingEl = document.getElementById('hand-swing');
+  const handIconEl = document.getElementById('hand-icon');
+  let lastHandSwing = 0;
+
+  function handGlyph(item) {
+    const span = document.createElement('span');
+    span.className = 'hand-glyph';
+    span.textContent = item.icon.glyph;
+    span.style.color = item.icon.color;
+    if (item.icon.rotate) span.style.transform = 'rotate(' + item.icon.rotate + 'deg)';
+    return span;
+  }
+
+  function renderHandItem() {
+    const s = hotbarSlots[hotbarIndex];
+    const item = (s && s.count > 0 && ITEM_BY_ID[s.type]) ? ITEM_BY_ID[s.type] : null;
+    handIconEl.innerHTML = '';
+    if (!item || thirdPerson) {
+      // Empty hand — or third person, where the 2D hand overlay makes no sense.
+      handItemEl.classList.remove('visible');
+      return;
+    }
+    const icon = item.icon;
+    if (icon) {
+      if (icon.bg) {
+        // Ore-style block: dark backdrop square with the glyph inside.
+        const block = document.createElement('div');
+        block.className = 'hand-block';
+        block.style.background = icon.bg;
+        block.appendChild(handGlyph(item));
+        handIconEl.appendChild(block);
+      } else {
+        handIconEl.appendChild(handGlyph(item));
+      }
+    } else {
+      // Plain block: a solid colour square filling the hand.
+      const sw = document.createElement('div');
+      sw.className = 'hand-block';
+      sw.style.background = item.color;
+      handIconEl.appendChild(sw);
+    }
+    handItemEl.classList.add('visible');
+  }
+
+  // Play a quick downward chop. Rate-limited so repeated calls during
+  // continuous mining don't restart the animation every frame.
+  function swingHand() {
+    const now = performance.now();
+    if (now - lastHandSwing < 180) return;
+    lastHandSwing = now;
+    handSwingEl.classList.remove('swinging');
+    void handSwingEl.offsetWidth;   // force reflow so the animation restarts
+    handSwingEl.classList.add('swinging');
+  }
+  handSwingEl.addEventListener('animationend', () => handSwingEl.classList.remove('swinging'));
+
+  function renderInventory() {
+    invGridEl.innerHTML = '';
+    for (let i = 0; i < INV_SIZE; i++) {
+      invGridEl.appendChild(makeSlotEl('inv', i, invSlots[i], false));
+    }
+    renderInvHotbarRow();
+    renderCrafting();
+  }
+
+  // Render the 3x3 crafting grid + output slot, and re-evaluate the recipe.
+  function renderCrafting() {
+    // Re-evaluate the recipe whenever the grid is rendered.
+    craftingOutput = matchRecipe();
+
+    craftGridEl.innerHTML = '';
+    for (let i = 0; i < CRAFT_SIZE; i++) {
+      const slot = document.createElement('div');
+      slot.className = 'slot';
+      slot.dataset.container = 'craft';
+      slot.dataset.index = i;
+      const s = craftingSlots[i];
+      if (s && s.count > 0 && ITEM_BY_ID[s.type]) {
+        slot.appendChild(makeItemIcon(ITEM_BY_ID[s.type]));
+        if (gameMode === 'survival' && s.count > 1) {
+          slot.appendChild(countLabel(s.count));
+        }
+        slot.title = ITEM_BY_ID[s.type].name;
+      }
+      attachDrag(slot, 'craft', i);
+      craftGridEl.appendChild(slot);
+    }
+
+    // Output slot
+    craftOutputEl.innerHTML = '';
+    if (craftingOutput && ITEM_BY_ID[craftingOutput.type]) {
+      craftOutputEl.appendChild(makeItemIcon(ITEM_BY_ID[craftingOutput.type]));
+      if (craftingOutput.count > 1) {
+        craftOutputEl.appendChild(countLabel(craftingOutput.count));
+      }
+      craftOutputEl.title = ITEM_BY_ID[craftingOutput.type].name;
+      craftOutputEl.classList.add('has-output');
+    } else {
+      craftOutputEl.classList.remove('has-output');
+    }
+  }
+
+  function toggleInventory() {
+    // Closing the inventory while still holding an item returns it to its
+    // source slot first (so it never vanishes).
+    if (inventoryOpen && dragItem) returnDragItemToSource();
+    inventoryOpen = !inventoryOpen;
+    if (inventoryOpen) {
+      inventoryEl.classList.add('open');
+      // The floating bar is redundant while the panel is open: the panel has
+      // its own bound-to-the-same-data hotbar row at the bottom.
+      hotbarEl.classList.add('hidden');
+      renderInventory();   // refresh contents + the embedded hotbar row
+      if (controls.isLocked) controls.unlock();
+    } else {
+      inventoryEl.classList.remove('open');
+      hotbarEl.classList.remove('hidden');
+      controls.lock(); // re-lock pointer (user gesture = keydown)
+    }
+    // If we no longer hold anything, hide the cursor ghost.
+    if (!dragItem) updateGhost();
+  }
+
+  // ---------- Furnace UI ----------
+  function openFurnaceAt(x, y, z) {
+    openFurnaceState = getFurnaceState(x, y, z);
+    openFurnaceKey = k(x, y, z);
+    furnaceOpen = true;
+    openFurnaceState.dirty = true;
+    furnaceEl.classList.add('open');
+    renderFurnace();
+    // Free the mouse so the player can click the furnace slots.
+    if (controls.isLocked) controls.unlock();
+  }
+
+  function closeFurnace() {
+    if (!furnaceOpen) return;
+    // Never swallow a held item when closing the UI.
+    if (dragItem) returnDragItemToSource();
+    furnaceOpen = false;
+    openFurnaceState = null;
+    openFurnaceKey = null;
+    furnaceEl.classList.remove('open');
+    updateGhost();
+    controls.lock(); // re-lock the pointer (runs from a user gesture)
+  }
+
+  function renderFurnace() {
+    if (!openFurnaceState) return;
+    renderFurnaceSlot(furnaceInputEl, openFurnaceState.input);
+    renderFurnaceSlot(furnaceFuelEl, openFurnaceState.fuel);
+    renderFurnaceSlot(furnaceOutputEl, openFurnaceState.output);
+    openFurnaceState.dirty = false;
+    updateFurnaceBars();
+  }
+  function renderFurnaceSlot(el, s) {
+    el.innerHTML = '';
+    if (s && s.count > 0 && ITEM_BY_ID[s.type]) {
+      el.appendChild(makeItemIcon(ITEM_BY_ID[s.type]));
+      if (s.count > 1) el.appendChild(countLabel(s.count));
+      el.title = ITEM_BY_ID[s.type].name;
+    } else {
+      el.removeAttribute('title');
+    }
+  }
+  // Fire bar = remaining burn time; arrow bar = smelting progress.
+  function updateFurnaceBars() {
+    const st = openFurnaceState;
+    const burnPct = (st && st.burnTotal > 0)
+      ? Math.max(0, Math.min(1, st.burnTime / st.burnTotal)) : 0;
+    const cookPct = st ? Math.max(0, Math.min(1, st.cook / COOK_TIME)) : 0;
+    furnaceFireFill.style.height = (burnPct * 100) + '%';
+    furnaceArrowFill.style.width = (cookPct * 100) + '%';
+  }
+
+  // Advance one furnace by dt seconds: burn fuel, then cook input -> output.
+  function tickFurnace(st, dt) {
+    const outType = st.input ? SMELT_RECIPES[st.input.type] : null;
+    const canSmelt = !!outType &&
+      (!st.output || (st.output.type === outType && st.output.count < MAX_STACK));
+
+    // Ignite: consume one fuel unit when idle and there is work to do.
+    if (st.burnTime <= 0 && canSmelt && st.fuel && FUEL_TIME[st.fuel.type] != null) {
+      st.burnTime = FUEL_TIME[st.fuel.type];
+      st.burnTotal = st.burnTime;
+      if (st.fuel.count !== Infinity) {
+        st.fuel.count -= 1;
+        if (st.fuel.count <= 0) st.fuel = null;
+      }
+      st.dirty = true;
+    }
+
+    if (st.burnTime > 0) {
+      st.burnTime -= dt;
+      if (st.burnTime < 0) st.burnTime = 0;
+      if (canSmelt) {
+        st.cook += dt;
+        if (st.cook >= COOK_TIME) {
+          st.cook -= COOK_TIME;
+          // Consume one input and produce one output.
+          if (st.input.count !== Infinity) {
+            st.input.count -= 1;
+            if (st.input.count <= 0) st.input = null;
+          }
+          if (st.output) st.output.count += 1;
+          else st.output = { type: outType, count: 1 };
+          st.dirty = true;
+        }
+      } else {
+        st.cook = 0;
+      }
+    } else {
+      st.cook = 0;
+    }
+  }
+
+  // All furnaces keep running even when their UI is closed.
+  function tickFurnaces(dt) {
+    for (const st of furnaceStates.values()) tickFurnace(st, dt);
+  }
+
+  // ---------- Item drag / split / merge (Minecraft-style) ----------
+  // A single held item ("dragItem") floats on the cursor. Picking up deducts
+  // from the source slot immediately (Model A). Cancelling returns the held
+  // item to its source slot.
+  let dragItem = null;           // null | { type, count, sourceContainer, sourceIndex }
+  let dragGhost = null;          // floating swatch following the cursor
+
+  // Create / update / remove the ghost element that follows the cursor.
+  function updateGhost() {
+    if (!dragItem) {
+      if (dragGhost) { dragGhost.remove(); dragGhost = null; }
+      return;
+    }
+    if (!dragGhost) {
+      dragGhost = document.createElement('div');
+      dragGhost.className = 'swatch drag-ghost';
+      dragGhost.style.position = 'fixed';
+      dragGhost.style.pointerEvents = 'none';
+      dragGhost.style.zIndex = '100';
+      dragGhost.style.opacity = '0.85';
+      dragGhost.style.width = '36px';
+      dragGhost.style.height = '36px';
+      dragGhost.style.display = 'flex';
+      dragGhost.style.alignItems = 'center';
+      dragGhost.style.justifyContent = 'center';
+      dragGhost.style.boxShadow = 'inset 0 0 0 1px rgba(0,0,0,0.4)';
+      document.body.appendChild(dragGhost);
+    }
+    const item = ITEM_BY_ID[dragItem.type];
+    // Rebuild the ghost content from scratch so switching between a tool
+    // glyph, an ore block icon, and a plain swatch always renders cleanly
+    // (no stale nested nodes left behind).
+    dragGhost.innerHTML = '';
+    if (item && item.icon) {
+      dragGhost.style.background = 'transparent';
+      dragGhost.style.boxShadow = 'none';
+      dragGhost.appendChild(makeItemIcon(item));
+    } else if (item) {
+      dragGhost.style.background = item.color;
+      dragGhost.style.boxShadow = 'inset 0 0 0 1px rgba(0,0,0,0.4)';
+    }
+    // Show count on the ghost when > 1 (survival only).
+    if (gameMode === 'survival' && dragItem.count > 1) {
+      dragGhost.appendChild(countLabel(dragItem.count));
+    }
+  }
+  function moveGhost(clientX, clientY) {
+    if (dragGhost) {
+      dragGhost.style.left = (clientX - 18) + 'px';
+      dragGhost.style.top = (clientY - 18) + 'px';
+    }
+  }
+
+  // Find the slot (data-container / data-index) under the cursor, or null.
+  function getSlotUnderCursor(clientX, clientY) {
+    const el = document.elementFromPoint(clientX, clientY);
+    let node = el;
+    while (node && !node.dataset) node = node.parentElement;
+    while (node && node.dataset && node.dataset.container == null) {
+      node = node.parentElement;
+    }
+    if (node && node.dataset && node.dataset.container != null) {
+      return {
+        container: node.dataset.container,
+        index: parseInt(node.dataset.index, 10),
+      };
+    }
+    return null;
+  }
+
+  // Pick up items from a slot into the cursor.
+  // mode: 'all' (left click) takes the whole stack; 'half' (right click)
+  // takes ceil(count/2) and leaves the rest. In creative mode items are
+  // infinite, so the source is never depleted.
+  function pickupFromSlot(container, index, mode) {
+    const s = getSlot(container, index);
+    if (!s || s.count <= 0) return;
+    let take;
+    if (s.count === Infinity) {
+      take = Infinity;                       // creative: never deplete
+    } else if (mode === 'half') {
+      if (s.count <= 1) return;              // can't split a single item
+      take = Math.ceil(s.count / 2);
+      s.count -= take;
+      if (s.count <= 0) setSlot(container, index, null);
+    } else {
+      take = s.count;
+      setSlot(container, index, null);
+    }
+    dragItem = { type: s.type, count: take, sourceContainer: container, sourceIndex: index };
+    updateGhost();
+  }
+
+  // Return the held item back to its source slot (merge if possible).
+  function returnDragItemToSource() {
+    if (!dragItem) return;
+    const { type, count, sourceContainer, sourceIndex } = dragItem;
+    const src = getSlot(sourceContainer, sourceIndex);
+    if (!src) {
+      setSlot(sourceContainer, sourceIndex, { type, count });
+    } else if (src.type === type && src.count < MAX_STACK) {
+      src.count = Math.min(MAX_STACK, src.count + count);
+    } else {
+      // Source slot now holds a different (or full) item — fall back to
+      // adding to the inventory; if even that fails the item is dropped.
+      addItem(type, count);
+    }
+    dragItem = null;
+    updateGhost();
+  }
+
+  // Place some of the held item into a target slot.
+  // amount: 'all' (left click) or 1 (right click).
+  // Returns true if anything was placed.
+  function placeDragItem(targetContainer, targetIndex, amount) {
+    if (!dragItem) return false;
+    const target = getSlot(targetContainer, targetIndex);
+    const want = (amount === 'all') ? dragItem.count : 1;
+    let placed = 0;
+
+    if (!target) {
+      // Empty slot: place up to `want` (capped by what we're holding).
+      placed = Math.min(want, dragItem.count);
+      setSlot(targetContainer, targetIndex, { type: dragItem.type, count: placed });
+    } else if (target.type === dragItem.type && target.count < MAX_STACK) {
+      // Same type, not full: merge up to the stack limit.
+      const space = MAX_STACK - target.count;
+      placed = Math.min(want, space, dragItem.count);
+      target.count += placed;
+    } else {
+      // Different type or full: cannot place.
+      return false;
+    }
+
+    if (dragItem.count !== Infinity) {
+      dragItem.count -= placed;
+      if (dragItem.count <= 0) dragItem = null;
+    }
+    updateGhost();
+    return placed > 0;
+  }
+
+  // mousedown on any inventory/hotbar/craft/furnace slot drives the drag
+  // system. Furnace output can only be taken from, never inserted into.
+  function attachDrag(slot, container, index) {
+    slot.addEventListener('mousedown', (e) => {
+      if (!inventoryOpen && !furnaceOpen) return;
+      e.preventDefault();
+      e.stopPropagation();
+
+      if (dragItem) {
+        // Holding an item: the furnace output is take-only.
+        if (container === 'furnace-output') return;
+        // Left = place all, right = place 1.
+        const amount = (e.button === 2) ? 1 : 'all';
+        placeDragItem(container, index, amount);
+      } else {
+        // Not holding: pick up. Left = all, right = half (only if stack > 1).
+        const mode = (e.button === 2) ? 'half' : 'all';
+        pickupFromSlot(container, index, mode);
+      }
+      renderHotbar();
+      renderInventory();
+      if (furnaceOpen) renderFurnace();
+    });
+  }
+
+  // Furnace slots use fixed DOM nodes, so bind their handlers once.
+  attachDrag(furnaceInputEl, 'furnace-input', 0);
+  attachDrag(furnaceFuelEl, 'furnace-fuel', 0);
+  attachDrag(furnaceOutputEl, 'furnace-output', 0);
+
+  // Clicking anywhere that is not a slot (inventory background, canvas,
+  // hotbar gaps, furnace panel background, etc.) while holding an item
+  // returns it to its source. Slot and craft-output handlers call
+  // stopPropagation(), so only genuine blank-area clicks reach this listener.
+  document.addEventListener('mousedown', (e) => {
+    if ((!inventoryOpen && !furnaceOpen) || !dragItem) return;
+    const under = getSlotUnderCursor(e.clientX, e.clientY);
+    if (!under) {
+      e.preventDefault();
+      returnDragItemToSource();
+      renderHotbar();
+      renderInventory();
+      if (furnaceOpen) renderFurnace();
+    }
+  });
+
+  // Suppress the browser context menu on inventory/hotbar/furnace so right-
+  // click can be used for split (pick up half) and place-one operations.
+  inventoryEl.addEventListener('contextmenu', (e) => e.preventDefault());
+  hotbarEl.addEventListener('contextmenu', (e) => e.preventDefault());
+  furnaceEl.addEventListener('contextmenu', (e) => e.preventDefault());
+
+  // Keep the ghost following the cursor.
+  document.addEventListener('mousemove', (e) => {
+    moveGhost(e.clientX, e.clientY);
+  });
+
+  // Closing the inventory with an item still held returns it to its source.
+  // (Handled inside toggleInventory above.)
+
+  // Take the crafting output: add it to the inventory and consume one of
+  // each material in the 3x3 grid. Does nothing if the inventory is full.
+  function takeCraftOutput() {
+    if (!craftingOutput) return;
+    // Try to add the output to the inventory first; if it fails (full),
+    // don't consume the materials.
+    const added = addItem(craftingOutput.type, craftingOutput.count);
+    if (!added) return;
+
+    // Consume 1 from each non-empty crafting slot.
+    for (let i = 0; i < CRAFT_SIZE; i++) {
+      const s = craftingSlots[i];
+      if (s) {
+        s.count -= 1;
+        if (s.count <= 0) craftingSlots[i] = null;
+      }
+    }
+    renderHotbar();
+    renderInventory();
+  }
+  // Clicking the output slot takes the crafted item.
+  craftOutputEl.addEventListener('mousedown', (e) => {
+    if (e.button !== 0) return;
+    if (!inventoryOpen) return;
+    e.preventDefault();
+    e.stopPropagation();
+    takeCraftOutput();
+  });
+
+  let itemNameTimer = null;
+  function showItemName() {
+    const s = hotbarSlots[hotbarIndex];
+    const item = (s && s.count > 0) ? ITEM_BY_ID[s.type] : null;
+    itemNameEl.textContent = item ? item.name : '';
+    itemNameEl.classList.add('show');
+    // Reset any pending fade-out so repeated switches keep it visible.
+    if (itemNameTimer) clearTimeout(itemNameTimer);
+    itemNameTimer = setTimeout(() => {
+      itemNameEl.classList.remove('show');
+      itemNameTimer = null;
+    }, 1300);
+  }
+
+  function cycleHotbar(dir) {
+    // dir > 0: next slot (down); dir < 0: prev slot (up). Infinite loop.
+    hotbarIndex = (hotbarIndex + dir + HOTBAR_SIZE) % HOTBAR_SIZE;
+    renderHotbar();
+    showItemName();
+  }
+
+  window.addEventListener('wheel', (e) => {
+    if (inventoryOpen || furnaceOpen) return; // don't switch while a UI is open
+    e.preventDefault();
+    cycleHotbar(e.deltaY > 0 ? 1 : -1);
+  }, { passive: false });
+
+  // ---------- Raycasting ----------
+  const raycaster = new THREE.Raycaster();
+  raycaster.far = 6;
+  const camDir = new THREE.Vector3();
+  // Terrain is the only raycast target. Water is purely visual — it never
+  // occludes the ray and can never be the place/break target, so you cannot
+  // place blocks on the water surface.
+  const terrainMeshes = [grassTopMesh, grassSideMesh, dirtMesh, stoneMesh, woodMesh, leavesMesh, planksMesh,
+    coalOreMesh, ironOreMesh, goldOreMesh, diamondOreMesh, redstoneOreMesh, furnaceMesh,
+    // The bed is split across three meshes (top / side / bottom), so all three
+    // must be targetable here or it becomes unminable "bedrock".
+    bedTopMesh, bedSideMesh, bedBottomMesh];
+
+  function hitToBlock(hit) {
+    const p = hit.point;
+
+    // The hit point lies on a face plane, so one of its coordinates is
+    // (almost) an integer. The axis closest to an integer is the face
+    // normal axis. This avoids relying on hit.face.normal (which can be
+    // flipped by DoubleSide materials).
+    const fx = Math.abs(p.x - Math.round(p.x));
+    const fy = Math.abs(p.y - Math.round(p.y));
+    const fz = Math.abs(p.z - Math.round(p.z));
+
+    // Outward face normal points toward the incoming ray, so its sign on
+    // the face axis is opposite to the ray direction component on that axis.
+    let nx = 0, ny = 0, nz = 0;
+    if (fx <= fy && fx <= fz) {
+      nx = camDir.x >= 0 ? -1 : 1;
+    } else if (fy <= fz) {
+      ny = camDir.y >= 0 ? -1 : 1;
+    } else {
+      nz = camDir.z >= 0 ? -1 : 1;
+    }
+
+    // Step from the hit point opposite to the outward normal (into the block)
+    // and floor to get the struck block's coordinates.
+    const EPS = 0.001;
+    const bx = Math.floor(p.x - nx * EPS);
+    const by = Math.floor(p.y - ny * EPS);
+    const bz = Math.floor(p.z - nz * EPS);
+
+    return { x: bx, y: by, z: bz, nx, ny, nz };
+  }
+
+  function pickBlock() {
+    camera.getWorldDirection(camDir);
+    // Cast from the player's eyes, not the camera, so reach stays consistent
+    // in third person (where the camera sits blocks behind the player).
+    raycaster.set(headPos, camDir);
+
+    // Only terrain is targetable. Water is ignored by the raycaster — the
+    // ray passes straight through it, so blocks below/behind water can be
+    // hit, but open water (no terrain behind) yields no target.
+    const terrainHits = raycaster.intersectObjects(terrainMeshes, false);
+    if (terrainHits.length > 0) return hitToBlock(terrainHits[0]);
+
+    return null;
+  }
+
+  function placeBlock(hit) {
+    const s = hotbarSlots[hotbarIndex];
+    if (!s || s.count <= 0) return; // no item in the selected hotbar slot
+    const type = s.type;
+    // Only placeable block types can be put into the world. Items like
+    // sticks and tools cannot be placed.
+    if (!PLACEABLE.has(type)) return;
+    const tx = hit.x + Math.round(hit.nx);
+    const ty = hit.y + Math.round(hit.ny);
+    const tz = hit.z + Math.round(hit.nz);
+    if (!inBounds(tx, ty, tz)) return;
+    const key = k(tx, ty, tz);
+
+    // Survival: consume one item from the selected hotbar slot before placing.
+    // If the stack runs out, clear the slot. Creative items are infinite.
+    if (gameMode === 'survival') {
+      s.count -= 1;
+      if (s.count <= 0) hotbarSlots[hotbarIndex] = null;
+      renderHotbar();
+    }
+
+    if (type === WATER) {
+      // Water is non-solid ("special air"): goes into waterSet,
+      // cannot be placed inside an existing solid block.
+      if (blockMap.has(key)) return;
+      waterSet.add(key);
+      waterDist.set(key, 0); // player-placed water is a fresh source
+    } else {
+      // Solid block: displaces any water at the target cell.
+      if (blockMap.has(key)) return;
+      waterSet.delete(key);
+      waterDist.delete(key);
+      setBlock(tx, ty, tz, type);
+    }
+    buildGeometry();
+    restartWaterSpread();
+  }
+  function breakBlock(hit, canDrop = true) {
+    const key = k(hit.x, hit.y, hit.z);
+    let droppedType = null;
+    if (blockMap.has(key)) {
+      droppedType = blockMap.get(key); // remember what we broke (for pickup)
+      removeBlock(hit.x, hit.y, hit.z);
+
+      // Breaking a furnace also spills its contents and forgets its state.
+      if (droppedType === FURNACE) {
+        // If its UI is open, close it first so any held item is returned into
+        // the furnace (and therefore collected with the rest below).
+        if (furnaceOpen && openFurnaceKey === key) {
+          if (dragItem) returnDragItemToSource();
+          furnaceOpen = false;
+          openFurnaceState = null;
+          openFurnaceKey = null;
+          furnaceEl.classList.remove('open');
+          updateGhost();
+        }
+        const st = furnaceStates.get(key);
+        if (st && gameMode === 'survival') {
+          for (const it of [st.input, st.fuel, st.output]) {
+            if (it && it.count > 0) {
+              spawnDrop(it.type, hit.x + 0.5, hit.y + 0.5, hit.z + 0.5, it.count);
+            }
+          }
+        }
+        furnaceStates.delete(key);
+      }
+    } else if (waterSet.has(key)) {
+      waterSet.delete(key); // remove a water block (no item pickup)
+      waterDist.delete(key);
+    } else {
+      return;
+    }
+    buildGeometry();
+    restartWaterSpread(); // let water flow into the opened space
+
+    // Survival: spawn a physical drop at the broken block's centre. Ore blocks
+    // yield their item (coal, raw iron, ...); other blocks drop themselves.
+    // A too-weak tool drops nothing.
+    if (gameMode === 'survival' && droppedType != null && canDrop) {
+      let dropType = droppedType;
+      if (ORE_DROP[droppedType] != null) dropType = ORE_DROP[droppedType];
+      spawnDrop(dropType, hit.x + 0.5, hit.y + 0.5, hit.z + 0.5, 1);
+    }
+  }
+
+  renderer.domElement.addEventListener('mousedown', (e) => {
+    if (!controls.isLocked) return;
+    if (e.button === 2) {                      // RMB: eat / open furnace / place
+      // Food in hand wins over everything: eating must never place a block or
+      // trigger a furnace/bed.
+      if (!isDead && tryEat()) {
+        swingHand();
+        return;
+      }
+      const hit = pickBlock();
+      if (hit) {
+        const hitType = blockMap.get(k(hit.x, hit.y, hit.z));
+        if (hitType === FURNACE) {
+          // Right-clicking a furnace opens its dedicated UI.
+          openFurnaceAt(hit.x, hit.y, hit.z);
+        } else if (hitType === BED) {
+          // Right-clicking a bed skips the night instantly.
+          skipToDay();
+        } else {
+          placeBlock(hit);
+          swingHand();
+        }
+      }
+    } else if (e.button === 0) {               // LMB: attack zombie / break block
+      swingHand();
+      // A zombie under the crosshair takes priority over the terrain behind it.
+      const zb = pickZombie();
+      if (zb) {
+        const now = performance.now();
+        if (now - lastAttackTime >= ATTACK_COOLDOWN) {
+          lastAttackTime = now;
+          damageZombie(zb, playerDamage);
+        }
+        return;   // never punch the block behind a zombie
+      }
+      if (gameMode === 'creative') {
+        // Creative: instant break.
+        const hit = pickBlock();
+        if (hit) breakBlock(hit);
+      } else {
+        // Survival: start holding-to-mine. Actual progress accumulates in
+        // the animate loop; releasing or aiming elsewhere cancels it.
+        isMiningPressed = true;
+      }
+    }
+  });
+  // Releasing LMB cancels any in-progress mining.
+  window.addEventListener('mouseup', (e) => {
+    if (e.button === 0) {
+      isMiningPressed = false;
+      miningTarget = null;
+      miningProgress = 0;
+    }
+  });
+  // If the pointer leaves the canvas while held, also cancel mining.
+  renderer.domElement.addEventListener('mouseleave', () => {
+    isMiningPressed = false;
+    miningTarget = null;
+    miningProgress = 0;
+  });
+  renderer.domElement.addEventListener('contextmenu', e => e.preventDefault());
+
+  // ---------- Resize ----------
+  window.addEventListener('resize', () => {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  });
+
+  // ---------- Main loop ----------
+  const up = new THREE.Vector3(0, 1, 0);
+  const forward = new THREE.Vector3();
+  const right = new THREE.Vector3();
+  const wishDir = new THREE.Vector3();
+  // Eye (head) position — camera anchor, raycast origin and water probe.
+  const headPos = new THREE.Vector3(feet.x, feet.y + EYE_HEIGHT, feet.z);
+  // Full 3D view direction (unlike `forward`, which is flattened for movement).
+  const lookDir = new THREE.Vector3();
+  let last = performance.now();
+
+  function animate() {
+    requestAnimationFrame(animate);
+    const now = performance.now();
+    let dt = (now - last) / 1000;
+    last = now;
+    if (dt > 0.05) dt = 0.05;
+
+    tickWaterSpread(dt);
+
+    // The avatar and the eye anchor both track the physics position, in
+    // first and third person alike.
+    playerMesh.position.set(feet.x, feet.y + PLAYER_BODY_H / 2, feet.z);
+    headPos.set(feet.x, feet.y + EYE_HEIGHT, feet.z);
+
+    // ---------- Day / night cycle ----------
+    // worldTime only advances while the game is actually being played, so
+    // opening a UI or pausing freezes the clock.
+    if (gameMode && controls.isLocked && !isDead) {
+      worldTime = (worldTime + dt * 1000) % DAY_LENGTH;
+    }
+    const phase = worldTime / DAY_LENGTH;
+    updateSky(phase);
+    const isNight = phase >= NIGHT_START;
+    renderTimeLabel(isNight);
+
+    if (isNight !== wasNight) {
+      wasNight = isNight;
+      // Dawn no longer wipes the horde: exposed zombies burn in the sunlight
+      // (see tickZombies), while sheltered ones survive until dusk.
+      if (isNight) zombieSpawnTimer = 0;   // dusk: start counting spawns
+    }
+    if (isNight && gameMode && !isDead) {
+      zombieSpawnTimer += dt * 1000;
+      if (zombieSpawnTimer >= ZOMBIE_SPAWN_INTERVAL) {
+        zombieSpawnTimer -= ZOMBIE_SPAWN_INTERVAL;
+        // Cap check before every attempt: at 10 alive, skip this spawn.
+        if (zombies.length < MAX_ZOMBIES) spawnZombies(1);
+      }
+    } else {
+      zombieSpawnTimer = 0;               // daytime pauses the spawn timer
+    }
+
+    // Furnaces keep smelting whether or not their UI is open.
+    if (gameMode) tickFurnaces(dt);
+    // Zombies only act while the game is actually running.
+    if (gameMode && controls.isLocked && !isDead) tickZombies(dt);
+    // Drops keep falling/floating even while a UI is open; collection only
+    // makes sense while alive.
+    if (gameMode && !isDead) tickDrops(dt, now);
+    if (furnaceOpen && openFurnaceState) {
+      if (openFurnaceState.dirty) renderFurnace();
+      else updateFurnaceBars();
+    }
+
+    if (controls.isLocked && gameMode && !isDead) {
+      camera.getWorldDirection(forward);
+      forward.y = 0; forward.normalize();
+      right.crossVectors(forward, up).normalize();
+      wishDir.set(0, 0, 0);
+      if (keys['KeyW']) wishDir.add(forward);
+      if (keys['KeyS']) wishDir.sub(forward);
+      if (keys['KeyD']) wishDir.add(right);
+      if (keys['KeyA']) wishDir.sub(right);
+      if (wishDir.lengthSq() > 0) wishDir.normalize();
+
+      // Water resistance: check the player's BODY cells (feet + torso).
+      const fx = Math.floor(feet.x);
+      const fz = Math.floor(feet.z);
+      const fy0 = Math.floor(feet.y);
+      const inWater = isWater(fx, fy0, fz) || isWater(fx, fy0 + 1, fz);
+
+      // Sneak: hold Shift (left or right). Hold semantics, not toggle.
+      // When flying, Shift means "descend" and should NOT slow the player.
+      const sneaking = !flying && !!(keys['ShiftLeft'] || keys['ShiftRight']);
+
+      // Sprint: hold Tab while moving (WASD) — or while flying (boosts
+      // vertical flight too). Sneak takes priority over sprint.
+      const tabHeld = !!keys['Tab'];
+      const sprinting = tabHeld && !sneaking &&
+                        (wishDir.lengthSq() > 0 || flying);
+
+      let speed = MOVE_SPEED
+        * (inWater ? 0.5 : 1.0)
+        * (sneaking ? SNEAK_SPEED_MULT : 1.0)
+        * (sprinting ? SPRINT_SPEED_MULT : 1.0);
+      if (flying) speed *= FLY_HORIZ_MULT;
+
+      // Horizontal movement applies to both walking and flying. Edge
+      // protection (sneak-stick-to-edge) only when walking on the ground.
+      const protectEdge = sneaking && onGround && !flying;
+      const dx = wishDir.x * speed * dt;
+      const dz = wishDir.z * speed * dt;
+      if (dx !== 0) {
+        const nx = feet.x + dx;
+        if (!collides(nx, feet.y, feet.z) &&
+            !(protectEdge && !hasSupport(nx, feet.z))) {
+          feet.x = nx;
+        }
+      }
+      if (dz !== 0) {
+        const nz = feet.z + dz;
+        if (!collides(feet.x, feet.y, nz) &&
+            !(protectEdge && !hasSupport(feet.x, nz))) {
+          feet.z = nz;
+        }
+      }
+
+      // ---------- Flight (creative only) ----------
+      // No gravity; Space ascends, Shift descends.
+      if (gameMode === 'creative' && flying) {
+        // Holding Tab boosts both vertical and horizontal flight speed.
+        const flySpeed = FLY_SPEED * (sprinting ? SPRINT_SPEED_MULT : 1.0);
+        if (keys['Space']) feet.y += flySpeed * dt;
+        if (keys['ShiftLeft'] || keys['ShiftRight']) feet.y -= flySpeed * dt;
+        if (collides(feet.x, feet.y, feet.z)) {
+          if (keys['Space']) feet.y -= flySpeed * dt;
+          else feet.y += flySpeed * dt;
+        }
+        onGround = false;
+      } else {
+        // ---------- Normal walking + jump + gravity ----------
+        if (keys['Space'] && onGround) { velocity.y = JUMP_SPEED; onGround = false; }
+
+        velocity.y -= GRAVITY * dt;
+        const ny = feet.y + velocity.y * dt;
+        if (!collides(feet.x, ny, feet.z)) {
+          feet.y = ny;
+          onGround = false;
+        } else {
+          if (velocity.y < 0) onGround = true;
+          velocity.y = 0;
+        }
+      }
+
+      // ---------- Fall damage (survival only) ----------
+      // Track the highest point while airborne; on landing compute the drop.
+      if (gameMode === 'survival' && !flying) {
+        if (!onGround) {
+          if (!wasAirborne) { airborneMaxY = feet.y; wasAirborne = true; }
+          else if (feet.y > airborneMaxY) airborneMaxY = feet.y;
+          // Entering water cancels the accumulated fall immediately, so even
+          // sinking to the lake bed after a 100-block dive costs nothing.
+          if (feetInWater()) airborneMaxY = feet.y;
+        } else if (wasAirborne) {
+          // Just landed. Water beats the ground every time — even when only
+          // part of the footprint is wet (shoreline landings included).
+          const fallDist = airborneMaxY - feet.y;
+          if (fallDist > 3 && !feetInWater()) {
+            const dmg = Math.min(20, Math.floor(fallDist - 3));
+            damagePlayer(dmg);
+          }
+          wasAirborne = false;
+          airborneMaxY = feet.y;
+        }
+      }
+
+      // ---------- Drowning (survival only) ----------
+      // Counts time the player's HEAD (eye position) is inside a water block.
+      if (gameMode === 'survival') {
+        const headInWater = isWater(
+          Math.floor(headPos.x),
+          Math.floor(headPos.y),
+          Math.floor(headPos.z)
+        );
+        if (headInWater) {
+          underwaterTime += dt;
+          if (underwaterTime > 10) {
+            drownDamageTimer += dt;
+            if (drownDamageTimer >= 1) {
+              drownDamageTimer -= 1;
+              damagePlayer(1);
+            }
+          }
+        } else {
+          underwaterTime = 0;
+          drownDamageTimer = 0;
+        }
+      }
+
+      // Camera height: drop the eye while sneaking.
+      const eyeY = EYE_HEIGHT - (sneaking ? SNEAK_EYE_DROP : 0);
+      headPos.set(feet.x, feet.y + eyeY, feet.z);
+      if (thirdPerson) {
+        // Pull the camera back along the view direction and lift it a little,
+        // then aim at the body centre. Because the offset is derived from the
+        // current orientation, mouse look still orbits the camera around the
+        // player instead of fighting it.
+        camera.getWorldDirection(lookDir);
+        camera.position.copy(headPos)
+          .addScaledVector(lookDir, -TPS_DISTANCE)
+          .addScaledVector(up, TPS_LIFT);
+        camera.lookAt(feet.x, feet.y + PLAYER_BODY_H * 0.5, feet.z);
+      } else {
+        camera.position.copy(headPos);
+      }
+
+      // Sprint FOV: smoothly widen the view while sprinting for a sense of
+      // speed, then return to BASE_FOV when not sprinting.
+      const targetFov = sprinting ? SPRINT_FOV : BASE_FOV;
+      camera.fov += (targetFov - camera.fov) * Math.min(1, FOV_LERP_SPEED * dt);
+      camera.updateProjectionMatrix();
+    }
+
+    // Underwater mask: if the player's HEAD block is water, overlay a
+    // water-colored tint on the whole view. (The eye, not the camera — in
+    // third person the camera sits several blocks behind the player.)
+    const camInWater = isWater(
+      Math.floor(headPos.x),
+      Math.floor(headPos.y),
+      Math.floor(headPos.z)
+    );
+    underwaterEl.classList.toggle('active', camInWater);
+
+    // Sneak visual indicator (hold Shift).
+    const isSneaking = !!(keys['ShiftLeft'] || keys['ShiftRight']);
+    sneakEl.classList.toggle('active', isSneaking);
+
+    // ---------- Mining progress (survival: hold LMB) ----------
+    // In survival, holding LMB accumulates break progress on the targeted
+    // block. Releasing, aiming elsewhere, or aiming at air cancels it.
+    if (gameMode === 'survival' && isMiningPressed && !isDead) {
+      const hit = pickBlock();
+      if (hit) {
+        const hitKey = k(hit.x, hit.y, hit.z);
+        const blockType = blockMap.get(hitKey);
+        const breakTime = blockType != null ? BREAK_TIME[blockType] : null;
+        if (breakTime != null) {
+          if (miningTarget !== hitKey) {
+            // Target changed (or mining just started): reset progress.
+            miningTarget = hitKey;
+            miningProgress = 0;
+          }
+          // Pickaxe tier determines both speed and whether the block drops
+          // anything. Wooden = 1 (1.5x), stone = 2 (2x). Without the required
+          // tier mining is extremely slow and yields no drop.
+          const held = hotbarSlots[hotbarIndex];
+          const heldType = (held && held.count > 0) ? held.type : null;
+          const info = harvestInfo(blockType, heldType);
+          miningProgress += dt / (breakTime / info.speedMult);
+          swingHand();   // repeated chops while mining (rate-limited)
+          if (miningProgress >= 1) {
+            // Block fully mined: break it (drops only if the tool is adequate).
+            breakBlock(hit, info.drops);
+            miningTarget = null;
+            miningProgress = 0;
+          }
+        } else {
+          // Target is water/air — can't mine, cancel progress.
+          miningTarget = null;
+          miningProgress = 0;
+        }
+      } else {
+        // Aimed at nothing — cancel progress.
+        miningTarget = null;
+        miningProgress = 0;
+      }
+    } else if (miningProgress > 0 || miningTarget) {
+      // Not actively mining: reset any leftover state.
+      miningTarget = null;
+      miningProgress = 0;
+    }
+
+    const hit = pickBlock();
+    const miningRingEl = document.getElementById('mining-ring');
+    if (hit) {
+      highlight.position.set(hit.x + 0.5, hit.y + 0.5, hit.z + 0.5);
+      highlight.visible = true;
+      // Visual feedback: shift the highlight outline from black toward red
+      // as mining progress increases, so the player sees the block "cracking".
+      const p = Math.min(1, miningProgress);
+      // Interpolate 0x000000 -> 0xff2020 (red) as p goes 0 -> 1.
+      const r = Math.round(p * 0xff);
+      const g = Math.round(p * 0x20);
+      const b = Math.round(p * 0x20);
+      highlight.material.color.setRGB(r / 255, g / 255, b / 255);
+
+      // Circular progress ring below the crosshair: a conic-gradient arc
+      // that fills clockwise as mining progress goes 0 -> 1.
+      if (p > 0.001) {
+        const deg = Math.round(p * 360);
+        miningRingEl.style.background =
+          'conic-gradient(#ffffff ' + deg + 'deg, rgba(255,255,255,0.15) ' + deg + 'deg)';
+        miningRingEl.classList.add('active');
+      } else {
+        miningRingEl.classList.remove('active');
+      }
+    } else {
+      highlight.visible = false;
+      highlight.material.color.setHex(0x000000);
+      miningRingEl.classList.remove('active');
+    }
+
+    renderer.render(scene, camera);
+  }
+  animate();
+})();
+</script>
+
+
+</body></html>
